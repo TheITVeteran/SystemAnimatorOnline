@@ -532,14 +532,23 @@ async function encoderForward(self, model_inputs) {
         encoderFeeds.inputs_embeds = await self.encode_text({ input_ids: model_inputs.input_ids });
     }
     if (session.inputNames.includes('token_type_ids') && !encoderFeeds.token_type_ids) {
+        if (!encoderFeeds.input_ids) {
+            throw new Error('Both `input_ids` and `token_type_ids` are missing in the model inputs.');
+        }
         // Assign default `token_type_ids` (all zeroes) to the `encoderFeeds` if the model expects it,
         // but they weren't created by the tokenizer.
-        encoderFeeds.token_type_ids = new Tensor(
-            'int64',
-            new BigInt64Array(encoderFeeds.input_ids.data.length),
-            encoderFeeds.input_ids.dims
-        )
+        encoderFeeds.token_type_ids = zeros_like(encoderFeeds.input_ids);
     }
+    if (session.inputNames.includes('pixel_mask') && !encoderFeeds.pixel_mask) {
+        if (!encoderFeeds.pixel_values) {
+            throw new Error('Both `pixel_values` and `pixel_mask` are missing in the model inputs.');
+        }
+        // Assign default `pixel_mask` (all ones) to the `encoderFeeds` if the model expects it,
+        // but they weren't created by the processor.
+        const dims = encoderFeeds.pixel_values.dims;
+        encoderFeeds.pixel_mask = ones([dims[0], dims[2], dims[3]]);
+    }
+    
     return await sessionRun(session, encoderFeeds);
 }
 
@@ -4276,6 +4285,19 @@ export class LlamaModel extends LlamaPreTrainedModel { }
 export class LlamaForCausalLM extends LlamaPreTrainedModel { }
 //////////////////////////////////////////////////
 
+//////////////////////////////////////////////////
+// Helium models
+export class HeliumPreTrainedModel extends PreTrainedModel { }
+export class HeliumModel extends HeliumPreTrainedModel { }
+export class HeliumForCausalLM extends HeliumPreTrainedModel { }
+//////////////////////////////////////////////////
+
+//////////////////////////////////////////////////
+// Glm models
+export class GlmPreTrainedModel extends PreTrainedModel { }
+export class GlmModel extends GlmPreTrainedModel { }
+export class GlmForCausalLM extends GlmPreTrainedModel { }
+//////////////////////////////////////////////////
 
 //////////////////////////////////////////////////
 // EXAONE models
@@ -5428,6 +5450,8 @@ export class Dinov2WithRegistersForImageClassification extends Dinov2WithRegiste
     }
 }
 //////////////////////////////////////////////////
+export class GroundingDinoPreTrainedModel extends PreTrainedModel { }
+export class GroundingDinoForObjectDetection extends GroundingDinoPreTrainedModel { }
 
 //////////////////////////////////////////////////
 export class YolosPreTrainedModel extends PreTrainedModel { }
@@ -6125,6 +6149,9 @@ export class WavLMForAudioFrameClassification extends WavLMPreTrainedModel {
         return new TokenClassifierOutput(await super._call(model_inputs));
     }
 }
+
+export class StyleTextToSpeech2PreTrainedModel extends PreTrainedModel { }
+export class StyleTextToSpeech2Model extends StyleTextToSpeech2PreTrainedModel { }
 
 //////////////////////////////////////////////////
 // SpeechT5 models
@@ -7089,6 +7116,8 @@ const MODEL_MAPPING_NAMES_ENCODER_ONLY = new Map([
 
     ['maskformer', ['MaskFormerModel', MaskFormerModel]],
     ['mgp-str', ['MgpstrForSceneTextRecognition', MgpstrForSceneTextRecognition]],
+
+    ['style_text_to_speech_2', ['StyleTextToSpeech2Model', StyleTextToSpeech2Model]],
 ]);
 
 const MODEL_MAPPING_NAMES_ENCODER_DECODER = new Map([
@@ -7123,6 +7152,8 @@ const MODEL_MAPPING_NAMES_DECODER_ONLY = new Map([
     ['cohere', ['CohereModel', CohereModel]],
     ['gemma', ['GemmaModel', GemmaModel]],
     ['gemma2', ['Gemma2Model', Gemma2Model]],
+    ['helium', ['HeliumModel', HeliumModel]],
+    ['glm', ['GlmModel', GlmModel]],
     ['openelm', ['OpenELMModel', OpenELMModel]],
     ['qwen2', ['Qwen2Model', Qwen2Model]],
     ['phi', ['PhiModel', PhiModel]],
@@ -7219,6 +7250,8 @@ const MODEL_FOR_CAUSAL_LM_MAPPING_NAMES = new Map([
     ['cohere', ['CohereForCausalLM', CohereForCausalLM]],
     ['gemma', ['GemmaForCausalLM', GemmaForCausalLM]],
     ['gemma2', ['Gemma2ForCausalLM', Gemma2ForCausalLM]],
+    ['helium', ['HeliumForCausalLM', HeliumForCausalLM]],
+    ['glm', ['GlmForCausalLM', GlmForCausalLM]],
     ['openelm', ['OpenELMForCausalLM', OpenELMForCausalLM]],
     ['qwen2', ['Qwen2ForCausalLM', Qwen2ForCausalLM]],
     ['phi', ['PhiForCausalLM', PhiForCausalLM]],
@@ -7333,6 +7366,7 @@ const MODEL_FOR_OBJECT_DETECTION_MAPPING_NAMES = new Map([
 const MODEL_FOR_ZERO_SHOT_OBJECT_DETECTION_MAPPING_NAMES = new Map([
     ['owlvit', ['OwlViTForObjectDetection', OwlViTForObjectDetection]],
     ['owlv2', ['Owlv2ForObjectDetection', Owlv2ForObjectDetection]],
+    ['grounding-dino', ['GroundingDinoForObjectDetection', GroundingDinoForObjectDetection]],
 ]);
 
 const MODEL_FOR_IMAGE_SEGMENTATION_MAPPING_NAMES = new Map([

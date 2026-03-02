@@ -1,4 +1,11 @@
 /**
+ * Converts bounding boxes from center format to corners format.
+ *
+ * @param {number[]} arr The coordinate for the center of the box and its width, height dimensions (center_x, center_y, width, height)
+ * @returns {number[]} The coodinates for the top-left and bottom-right corners of the box (top_left_x, top_left_y, bottom_right_x, bottom_right_y)
+ */
+export function center_to_corners_format([centerX, centerY, width, height]: number[]): number[];
+/**
  * Post-processes the outputs of the model (for object detection).
  * @param {Object} outputs The outputs of the model that must be post-processed
  * @param {Tensor} outputs.logits The logits

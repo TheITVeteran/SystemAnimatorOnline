@@ -61,6 +61,14 @@ export class Processor extends Processor_base {
      */
     batch_decode(batch: number[][] | import("../transformers.js").Tensor, decode_args?: any): ReturnType<PreTrainedTokenizer["batch_decode"]>;
     /**
+     * @param {Parameters<PreTrainedTokenizer['decode']>} args
+     * @returns {ReturnType<PreTrainedTokenizer['decode']>}
+     */
+    decode(token_ids: number[] | bigint[] | import("../transformers.js").Tensor, decode_args?: {
+        skip_special_tokens?: boolean;
+        clean_up_tokenization_spaces?: boolean;
+    }): ReturnType<PreTrainedTokenizer["decode"]>;
+    /**
      * Calls the feature_extractor function with the given input.
      * @param {any} input The input to extract features from.
      * @param {...any} args Additional arguments.

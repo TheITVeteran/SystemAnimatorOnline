@@ -1,5 +1,5 @@
 // XR Animator
-// (2025-02-22)
+// (2025-03-17)
 
 var MMD_SA_options = {
 
@@ -6283,7 +6283,13 @@ const key_any = { key:'any', func:(e)=>{
 let cancel_default = true;
 
 const branch_to_return = (VMC_receiver_index == -1) ? 0 : 3;
-if (/(\+|\-)/.test(e.key) && (VMC_receiver_index != -1)) {
+if (/(\+|\-)/.test(e.key) && (VMC_receiver_index == -1)) {
+  step = (e.key == '+') ? 1 : -1;
+  MMD_SA.OSC.VMC.delay = THREE.Math.clamp(MMD_SA.OSC.VMC.delay + step*50, 0,1000);
+
+  MMD_SA_options.Dungeon.run_event(null,branch_to_return,0);
+}
+else if (/(\+|\-)/.test(e.key) && (VMC_receiver_index != -1)) {
   step = (e.key == '+') ? 1 : -1;
   System._browser.camera.VMC_receiver.config.prop_mocap_factor_percent = THREE.Math.clamp(System._browser.camera.VMC_receiver.config.prop_mocap_factor_percent + step, 0,100);
 
@@ -6463,7 +6469,15 @@ MMD_SA_options.Dungeon.utils.tooltip(
 );
     }
   },
-  { key:4, event_id:{ func:()=>{ MMD_SA.hide_3D_avatar=!MMD_SA.hide_3D_avatar; System._browser.update_tray(); }, goto_event: { id:"_VMC_PROTOCOL_", branch_index:0 } },
+  { key:4, branch_index:0,
+    onmouseover: function (e) {
+MMD_SA_options.Dungeon.utils.tooltip(
+  e.clientX, e.clientY,
+  System._browser.translation.get('XR_Animator.UI.VMC_protocol.delay.tooltip')
+);
+    }
+  },
+  { key:5, event_id:{ func:()=>{ MMD_SA.hide_3D_avatar=!MMD_SA.hide_3D_avatar; System._browser.update_tray(); }, goto_event: { id:"_VMC_PROTOCOL_", branch_index:0 } },
     onmouseover: function (e) {
 MMD_SA_options.Dungeon.utils.tooltip(
   e.clientX, e.clientY,
@@ -6471,7 +6485,7 @@ MMD_SA_options.Dungeon.utils.tooltip(
 );
     }
   },
-  { key:5, func:()=>{ VMC_receiver_index=0; },
+  { key:6, func:()=>{ VMC_receiver_index=0; },
     branch_index:3,
     onmouseover: function (e) {
 MMD_SA_options.Dungeon.utils.tooltip(
@@ -6672,11 +6686,13 @@ System._browser.translation.get('XR_Animator.UI.VMC_protocol.parameters'),
 '1. ' + System._browser.translation.get('XR_Animator.UI.VMC_protocol.info_short') + ': ' + ((MMD_SA.OSC.VMC.sender_enabled) ? 'ON' : 'OFF'),
 '2. ' + System._browser.translation.get('XR_Animator.UI.VMC_protocol.send_camera_data') + ': ' + ((MMD_SA.OSC.VMC.send_camera_data) ? 'ON':  'OFF'),
 '3. ' + System._browser.translation.get('XR_Animator.UI.VMC_protocol.app_mode') + ': ' + ((MMD_SA.OSC.app_mode && (MMD_SA.OSC.app_mode != 'Others')) ? MMD_SA.OSC.app_mode : System._browser.translation.get('Misc.others')),
-'4. ' + System._browser.translation.get('XR_Animator.UI.VMC_protocol.3D_avatar_display') + ': ' + ((MMD_SA.hide_3D_avatar) ? 'OFF' : 'ON'),
-'5. ' + System._browser.translation.get('XR_Animator.UI.VMC_protocol.VMC_receiver_options'),
+'4. ' + System._browser.translation.get('XR_Animator.UI.VMC_protocol.delay') + ': ' + MMD_SA.OSC.VMC.delay + 'ms' + '➕➖',
+'5. ' + System._browser.translation.get('XR_Animator.UI.VMC_protocol.3D_avatar_display') + ': ' + ((MMD_SA.hide_3D_avatar) ? 'OFF' : 'ON'),
+'6. ' + System._browser.translation.get('XR_Animator.UI.VMC_protocol.VMC_receiver_options'),
 'X. ' + System._browser.translation.get('Misc.done')
     ].join('\n');
   }
+ ,para: { row_max:11 }
  ,bubble_index: 3
  ,branch_list: branch_list
           }
@@ -8855,10 +8871,13 @@ function export_scene_JSON(para) {
         if (accessory) {
           const transform = accessory.transform = {};
 
-          if (accessory.scale_base)
+          if (accessory.scale_base) {
+            transform.scale_base = accessory.scale_base / 11;
             transform.scale_percent = placement.scale / accessory.scale_base * 100;
+          }
 
           const pos = MMD_SA.TEMP_v3.copy(parent_bone.position).multiplyScalar(1/MMD_SA.THREEX.VRM.vrm_scale);
+          pos.fromArray(System._browser.camera.poseNet.auto_scale_property(pos.toArray(), parent_bone.name, !!MMD_SA_options.user_camera.ML_models.enabled));
           transform.position = { x:-pos.x, y:pos.y, z:-pos.z };
 
           const rot = MMD_SA.TEMP_v3.copy(parent_bone.rotation);
@@ -10423,7 +10442,7 @@ MMD_SA_options.Dungeon.para_by_grid_id[2].ground_y = explorer_ground_y;
      ,[
         {
           message: {
-  get content() { return 'XR Animator (v0.33.3)\n' + System._browser.translation.get('XR_Animator.UI.UI_options.about_XR_Animator.message'); }
+  get content() { return 'XR Animator (v0.33.4b)\n' + System._browser.translation.get('XR_Animator.UI.UI_options.about_XR_Animator.message'); }
  ,bubble_index: 3
  ,branch_list: [
     { key:1, event_id: {
@@ -14431,6 +14450,7 @@ config.VMC = {
     host: MMD_SA.OSC.VMC.options.plugin.send.host,
   },
   app_mode: MMD_SA.OSC.app_mode,
+  delay: MMD_SA.OSC.VMC.delay,
 
   VMC_receiver: {
     config: Object.assign({}, System._browser.camera.VMC_receiver.config),
@@ -14750,6 +14770,7 @@ try {
         }
 
         MMD_SA.OSC.app_mode = config[p].app_mode;
+        MMD_SA.OSC.VMC.delay = config[p].delay;
 
         if (config[p].VMC_receiver) {
           Object.assign(System._browser.camera.VMC_receiver.config, config[p].VMC_receiver.config);
@@ -15237,6 +15258,8 @@ let scale = (modelX.para.hip_center.y + modelX.para.spine_length/2) / (11.364640
 const bone_pos_list = []
 for (const name of ['頭', '左ひじ','右ひじ', '左中指１','右中指１', '左ひざ','右ひざ', '左足首','右足首']) {
   const b_pos = modelX.get_bone_position_by_MMD_name(name, true);
+  if (!b_pos) continue;
+
   if (name == '頭') {
 //    const neck_height = modelX.get_bone_origin_by_MMD_name('頭')[1]-modelX.get_bone_origin_by_MMD_name('首')[1];
 //    let head_height = neck_height*3;
@@ -15307,6 +15330,44 @@ pos.sub(c_base.pos);
 
 //MMD_SA._trackball_camera.noZoom = true;
 MMD_SA.Camera_MOD.adjust_camera('auto_zoom', pos);
+    });
+
+    window.addEventListener('SL_MC_MouseEnter', (e)=>{
+if (MMD_SA.music_mode || (SL_MC_video_obj == System._browser.camera.video)) return;
+
+const d = e.detail;
+if (d.name == 'forward') {
+  d.result.tooltip_msg = 'Speed+';
+}
+else if (d.name == 'backward') {
+  d.result.tooltip_msg = 'Speed-';
+}
+    });
+
+    window.addEventListener('SL_MC_forward_backward', (e)=>{
+if (MMD_SA.music_mode || (SL_MC_video_obj == System._browser.camera.video)) return;
+
+const d = e.detail;
+const para_SA = MMD_SA.MMD.motionManager.para_SA;
+if (!para_SA.playbackRate_by_model_index)
+  para_SA.playbackRate_by_model_index = {};
+if (!para_SA.playbackRate_by_model_index[0])
+  para_SA.playbackRate_by_model_index[0] = 1;
+
+let playbackRate = para_SA.playbackRate_by_model_index[0];
+if (d.dir > 0) {
+  playbackRate = Math.min(playbackRate+0.25, 4);
+}
+else {
+  playbackRate = Math.max(playbackRate-0.25, 0.25);
+}
+
+para_SA.playbackRate_by_model_index[0] = playbackRate;
+
+DEBUG_show();
+DEBUG_show('Playback speed x ' + playbackRate, 3);
+
+d.result.return_value = true;
     });
   });
 

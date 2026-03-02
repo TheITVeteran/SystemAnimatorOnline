@@ -218,6 +218,7 @@ if (MMD_SA_options.is_XR_Animator) {
   this._eye.add(pos_offset);
 }
 
+
 // v0.25.0 (scale _eye to consider zoom distance)
     _eye.subVectors( this.position0, this.target ).normalize().multiplyScalar(this._eye.length());
     _eye3.set(0, _eye.y, -Math.sqrt(_eye.x*_eye.x + _eye.z*_eye.z));
@@ -283,6 +284,7 @@ if (MMD_SA_options.is_XR_Animator) {
   pos_offset = MMD_SA.THREEX.v4.copy(MMD_SA.Camera_MOD.get_camera_base().pos).sub(pos_raw);
   this._eye.add(pos_offset);
 }
+
 
 				axis.crossVectors( _rotateStart, _rotateEnd ).normalize();
 //DEBUG_show(axis.toArray().join("\n"))

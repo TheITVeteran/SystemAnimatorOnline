@@ -1,5 +1,5 @@
 // auto fit
-// (2025-02-22)
+// (2025-03-17)
 
 const v1 = new THREE.Vector3();
 const v2 = new THREE.Vector3();
@@ -571,9 +571,12 @@ function process_gesture() {
       }
 
       helpers.forEach((_helper,i)=>{
+        if (!_helper) return;
+
         let helper_id, helper_parent;
         let helper_para = {};
-        let path = (i==0) ? (p_full||_helper.path) : _helper.path;
+        let path = (i==0) ? (_helper.path||p_full) : _helper.path;
+
         if (/magnet\.(\d+)(\.?\w*)/.test(path)) {
           const magnet = MMD_SA.MMD.motionManager.para_SA.motion_tracking.arm_tracking.transformation.position.magnet[RegExp.$1];
 
@@ -609,6 +612,15 @@ function process_gesture() {
               helper_id += '-line';
               helper_para.line = [magnet.reference_point, magnet.line_end];
               helper_para.pos = _helper.pos || null;
+            }
+          }
+          else {
+// bone assumed
+            helper_parent = helper_id;
+            if (1) {
+              helper_id += '-point';
+              helper_parent = magnet.name;
+              helper_para.pos = magnet.offset || null;
             }
           }
         }

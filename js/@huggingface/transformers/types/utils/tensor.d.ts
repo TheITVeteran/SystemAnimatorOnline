@@ -365,10 +365,10 @@ export class Tensor {
      * NOTE: The returned tensor shares the storage with the input tensor, so changing the contents of one will change the contents of the other.
      * If you would like a copy, use `tensor.clone()` before squeezing.
      *
-     * @param {number} [dim=null] If given, the input will be squeezed only in the specified dimensions.
+     * @param {number|number[]} [dim=null] If given, the input will be squeezed only in the specified dimensions.
      * @returns {Tensor} The squeezed tensor
      */
-    squeeze(dim?: number): Tensor;
+    squeeze(dim?: number | number[]): Tensor;
     /**
      * In-place version of @see {@link Tensor.squeeze}
      */
@@ -407,6 +407,18 @@ export class Tensor {
     view(...dims: number[]): Tensor;
     neg_(): this;
     neg(): Tensor;
+    /**
+     * Computes input > val element-wise.
+     * @param {number} val The value to compare with.
+     * @returns {Tensor} A boolean tensor that is `true` where input is greater than other and `false` elsewhere.
+     */
+    gt(val: number): Tensor;
+    /**
+     * Computes input < val element-wise.
+     * @param {number} val The value to compare with.
+     * @returns {Tensor} A boolean tensor that is `true` where input is less than other and `false` elsewhere.
+     */
+    lt(val: number): Tensor;
     /**
      * In-place version of @see {@link Tensor.clamp}
      */

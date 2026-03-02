@@ -126,5 +126,30 @@ export function window_function(window_length: number, name: string, { periodic,
     frame_length?: number;
     center?: boolean;
 }): Float64Array;
+export class RawAudio {
+    /**
+     * Create a new `RawAudio` object.
+     * @param {Float32Array} audio Audio data
+     * @param {number} sampling_rate Sampling rate of the audio data
+     */
+    constructor(audio: Float32Array, sampling_rate: number);
+    audio: Float32Array<ArrayBufferLike>;
+    sampling_rate: number;
+    /**
+     * Convert the audio to a wav file buffer.
+     * @returns {ArrayBuffer} The WAV file.
+     */
+    toWav(): ArrayBuffer;
+    /**
+     * Convert the audio to a blob.
+     * @returns {Blob}
+     */
+    toBlob(): Blob;
+    /**
+     * Save the audio to a wav file.
+     * @param {string} path
+     */
+    save(path: string): Promise<void>;
+}
 import { Tensor } from './tensor.js';
 //# sourceMappingURL=audio.d.ts.map

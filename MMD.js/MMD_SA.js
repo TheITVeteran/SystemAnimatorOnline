@@ -1,5 +1,5 @@
 // MMD for System Animator
-// (2025-02-22)
+// (2025-03-17)
 
 var use_full_spectrum = true
 
@@ -9122,7 +9122,7 @@ for (const name in humanBones) {
 
 para.shoulder_width = (para.pos0['leftUpperArm'][0] - para.pos0['rightUpperArm'][0]) * vrm_scale;;
 para.left_arm_length = v1.fromArray(para.pos0['leftUpperArm']).distanceTo(v2.fromArray(para.pos0['leftHand'])) * vrm_scale;
-para.left_palm_length = v1.fromArray(para.pos0['leftHand']).distanceTo(v2.fromArray(para.pos0['leftMiddleProximal'])) * vrm_scale;
+para.left_palm_length = (para.pos0['leftMiddleProximal']) ? v1.fromArray(para.pos0['leftHand']).distanceTo(v2.fromArray(para.pos0['leftMiddleProximal'])) * vrm_scale : MMD_SA_options.model_para_obj.left_palm_length;
 //para.eye_width = v1.fromArray(para.pos0['leftEye']).distanceTo(v2.fromArray(para.pos0['rightEye'])) * vrm_scale;
 para.left_leg_length = ((para.pos0['leftUpperLeg'][1] - para.pos0['leftLowerLeg'][1]) + (para.pos0['leftLowerLeg'][1] - para.pos0['leftFoot'][1])) * vrm_scale;
 //para.left_leg_IK = [(para.pos0['leftUpperLeg'][0]-para.pos0['leftFoot'][0]) * vrm_scale, (para.pos0['leftUpperLeg'][1]-para.pos0['leftFoot'][1]) * vrm_scale, (para.pos0['leftUpperLeg'][2]-para.pos0['leftFoot'][2]) * vrm_scale];
@@ -9870,13 +9870,15 @@ obj_pos.x*sign, obj_pos.y, -obj_pos.z*sign,
   });
 
 
+  const msg_obj = MMD_SA.OSC.VMC.time_control({ pos_msgs, bone_msgs, morph_msgs, camera_msgs, tracker_msgs });
+
   MMD_SA.OSC.VMC.send(MMD_SA.OSC.VMC.Message("/VMC/Ext/Root/Pos",
-    pos_msgs,
+    msg_obj.pos_msgs,
     'sfffffff'
   ));
 
   MMD_SA.OSC.VMC.send(MMD_SA.OSC.VMC.Bundle(
-    ...bone_msgs.map(msg=>MMD_SA.OSC.VMC.Message(
+    ...msg_obj.bone_msgs.map(msg=>MMD_SA.OSC.VMC.Message(
 "/VMC/Ext/Bone/Pos",
 msg,
 'sfffffff'
@@ -9884,7 +9886,7 @@ msg,
   ));
 
   MMD_SA.OSC.VMC.send(MMD_SA.OSC.VMC.Bundle(
-    ...morph_msgs.map(msg=>MMD_SA.OSC.VMC.Message(
+    ...msg_obj.morph_msgs.map(msg=>MMD_SA.OSC.VMC.Message(
 "/VMC/Ext/Blend/Val",
 msg,
 'sf'
@@ -9892,16 +9894,16 @@ msg,
     MMD_SA.OSC.VMC.Message("/VMC/Ext/Blend/Apply")
   ));
 
-  if (camera_msgs) {
+  if (msg_obj.camera_msgs) {
     MMD_SA.OSC.VMC_camera.send(MMD_SA.OSC.VMC_camera.Message("/VMC/Ext/Cam",
-      camera_msgs,
+      msg_obj.camera_msgs,
       'sffffffff'
     ));
   }
 
-  if (tracker_msgs.length) {
+  if (msg_obj.tracker_msgs.length) {
     MMD_SA.OSC.VMC_misc.send(MMD_SA.OSC.VMC_misc.Bundle(
-      ...tracker_msgs.map(msg=>MMD_SA.OSC.VMC_misc.Message(
+      ...msg_obj.tracker_msgs.map(msg=>MMD_SA.OSC.VMC_misc.Message(
 "/VMC/Ext/Tra/Pos",
 msg,
 'sfffffff'
@@ -10461,6 +10463,10 @@ System._browser.on_animation_update.add(()=>{
   }
 
   MMD_SA._force_motion_shuffle = true;
+
+  MMD_SA.THREEX.utils.init_body_colliders();
+
+  threeX.get_model(0).resetPhysics();
 
   loading = false;
 }, 0,0);
@@ -14606,7 +14612,7 @@ else {
 
 helper_para.parent = helper_parent;
 helper_para.timestamp_ini = RAF_timestamp;
-helper_para.duration = 5000;
+helper_para.duration = para.duration || 5000;
 
 if (para.pos)
   helper.position.set(para.pos.x, para.pos.y, para.pos.z);
@@ -14617,6 +14623,419 @@ if (para.rot) {
 }
         };
       })(),
+
+      init_body_colliders: function () {
+console.log('(Initializing body colliders)')
+
+const _poseNet = System._browser.camera.poseNet;
+
+const model = _THREE.MMD.getModels()[0];
+const bones_by_name = model.mesh.bones_by_name;
+
+const modelX = threeX.get_model(0);
+
+// save some headaches and always start from scratch, especially in the case of model swapping
+const colliders_for_hands = MMD_SA_options.model_para_obj.colliders_for_hands = {};//MMD_SA_options.model_para_obj.colliders_for_hands || {};
+
+// v0.33.4
+// no need for scale_to_MMD when magnet's auto_scale is false
+const scale_to_MMD = 1;//MMD_SA_options.model_para_obj.left_arm_length / modelX.para.left_arm_length;
+
+const mid_finger = modelX.get_bone_origin_by_MMD_name('左中指１');
+
+// use MMD scale (hand_affected.left/right.offset)
+let palm_radius = (mid_finger) ? v1.fromArray(modelX.get_bone_origin_by_MMD_name('左手首')).distanceTo(v2.fromArray(mid_finger)) * scale_to_MMD : v1.fromArray(bones_by_name['左手首'].pmxBone.origin).distanceTo(v2.fromArray(bones_by_name['左中指１'].pmxBone.origin));
+
+if (!mid_finger) {
+// VRM scale
+  modelX.para.left_palm_length = MMD_SA_options.model_para_obj.left_palm_length / (MMD_SA_options.model_para_obj.left_arm_length / modelX.para.left_arm_length);
+  console.log('(Compatibility for missing finger)');
+}
+
+colliders_for_hands.left_hand = { children: [{
+  bone: 'leftHand',
+  offset: [palm_radius, 0, 0],
+  radius: palm_radius
+}] };
+
+
+colliders_for_hands.generate_hand_parameters = function () {
+  const hand_offset = this.left_hand.children[0].offset;
+  const hand_scale = 0.5;
+
+  const hand_affected = {
+    "left":  { "offset": {"x": hand_offset[0]*hand_scale, "y":hand_offset[1]*hand_scale, "z":hand_offset[2]*hand_scale} },
+    "right": { "offset": {"x":-hand_offset[0]*hand_scale, "y":hand_offset[1]*hand_scale, "z":hand_offset[2]*hand_scale} }
+  };
+
+  return hand_affected
+};
+
+colliders_for_hands.reset_hit = function () {
+  this._hit_ = {};
+  for (const d of ['左','右'])
+    this._hit_[d] = {};
+};
+
+colliders_for_hands.record_hit = function (m, d) {
+// use 'colliders_for_hands' instead of 'this'
+  colliders_for_hands._hit_[d][m.name.split('|')[0]] = true;
+}
+
+colliders_for_hands.debug_hit = (()=>{
+  const parts_map = {
+'head': 'Head',
+'chest': 'Chest',
+'spine': 'Waist',
+'下半身': 'Hip',
+  };
+
+  return function (m, d) {
+    let msg = '';
+    if (_poseNet.enabled && _poseNet.body_collider.enabled) {
+      for (const d of ['左','右']) {
+        const dir = (d=='左')?'L':'R';
+        msg += '👊-' + dir + ':' + (Object.keys(this._hit_[d]).map(p=>parts_map[p]).join(',')||'(no collider hit)') + '\n';
+      }
+    }
+
+    this.reset_hit();
+    return msg;
+  };
+})();
+
+
+colliders_for_hands.reset_hit();
+
+let _head_colliders;
+if (modelX.type == 'VRM') {
+  _head_colliders = modelX.model.springBoneManager.colliders.filter(c=>{
+    if (!c.shape.radius) return false;
+
+    let p = c;
+    while (p) {
+      p = p.parent;
+      if (p?.isBone) {
+        if (p.name == 'Head') return true;
+//if (/breast/i.test(p.name)) return true;
+        break;
+      }
+    }
+  });
+}
+else if (!MMD_SA.THREEX.enabled) {
+  const head_index = bones_by_name['頭']._index;
+  _head_colliders = model.pmx.rigids.filter(c=>(c.bone==head_index) && (c.shape==0||c.shape==2)).map(c=>{
+    return {
+      shape: {
+        radius: c.size[0],
+        offset: { x:c.ofs[0], y:c.ofs[1], z:c.ofs[2] }
+      }
+    };
+  });
+}
+
+const neck_height = modelX.get_bone_origin_by_MMD_name('頭')[1]-modelX.get_bone_origin_by_MMD_name('首')[1];
+
+const radius_head_default = Math.max(modelX.para.shoulder_width/3, neck_height);
+const _offset_scale = ((modelX.type == 'VRM') ? 1/MMD_SA.THREEX.VRM.vrm_scale : 1);
+let _head_colliders_default = [{
+  shape: {
+    radius: radius_head_default,
+    offset: { x:0, y:radius_head_default * _offset_scale, z:radius_head_default*0.5 * _offset_scale }
+  }
+}];
+
+// NOTE: magnet offset/line_end uses VRM scale. magnet radius uses MMD scale.
+if (!colliders_for_hands.head) {
+  colliders_for_hands.head = {
+    get scale() { return _poseNet.body_collider.head.size_percent/100; },
+
+    _head_colliders:_head_colliders,
+    _head_colliders_default:_head_colliders_default,
+
+    reset: function () {
+      let head_colliders = this._head_colliders_default;//this._head_colliders || this._head_colliders_default;//
+
+      const cos45 = 0.70710678118654752440084436210485;
+      const min = v1.set(9999,9999,9999);
+      const max = v2.set(-9999,-9999,-9999);
+      head_colliders.forEach(c=>{
+        let v = MMD_SA.TEMP_v3.copy(c.shape.offset).addScalar(c.shape.radius * cos45);
+        max.max(v);
+        v = MMD_SA.TEMP_v3.copy(c.shape.offset).addScalar(-c.shape.radius * cos45);
+        min.min(v);
+      });
+
+      const bb = new MMD_SA.THREEX.THREEX.Box3(min, max);
+      const bs = bb.getBoundingSphere(new MMD_SA.THREEX.THREEX.Sphere(bb.getCenter(v3)));
+
+      colliders_for_hands.head.parent = {
+is_parent: true,
+bone: 'head',
+offset: (modelX.type == 'VRM') ? modelX.process_position(v3.multiplyScalar(MMD_SA.THREEX.VRM.vrm_scale)).toArray() : v3.toArray(),
+radius: bs.radius,
+//line_end: [0, neck_height/2, 0],
+      };
+
+      colliders_for_hands.head.children = head_colliders.map(c=>{
+        function validate(pos, vector_add, rot_base) {
+const z_min = -modelX.para.spine_length/5;
+return pos.z > z_min;
+        }
+
+        const z_push = { validate:validate, rotation_base:true };
+
+        return {
+bone: 'head',
+offset: (modelX.type == 'VRM') ? modelX.process_position(MMD_SA.TEMP_v3.copy(c.shape.offset).multiplyScalar(MMD_SA.THREEX.VRM.vrm_scale)).toArray() : MMD_SA.TEMP_v3.copy(c.shape.offset).toArray(),
+radius: c.shape.radius,
+z_push: z_push,
+//use_vector_filter: true
+        };
+      });
+
+      if (colliders_for_hands.head.children.length == 1) {
+        colliders_for_hands.head.children = [Object.assign({}, colliders_for_hands.head.parent, {is_parent:false, z_push:colliders_for_hands.head.children[0].z_push, use_vector_filter:true})];
+        colliders_for_hands.head.parent = null;
+      }
+      console.log(colliders_for_hands.head)
+    },
+
+    generate_colliders: (()=>{
+      let scale, reaction_type;
+      let colliders;
+
+      return function () {
+if (!_poseNet.body_collider.head.enabled) return [];
+
+if ((scale === this.scale) && (reaction_type === _poseNet.body_collider.head.reaction_type)) return colliders;
+scale = this.scale;
+reaction_type = _poseNet.body_collider.head.reaction_type;
+
+colliders = ((this.parent && [this.parent])||[]).concat(this.children||[]).map((c,idx)=>{
+  const hand_affected = colliders_for_hands.generate_hand_parameters();
+  const radius = c.radius*scale*scale_to_MMD + hand_affected.left.offset.x;
+
+  return Object.assign({
+"type": "bone",
+"name": c.bone,
+"offset": {"x":c.offset[0], "y":c.offset[1], "z":c.offset[2]},
+"hand_affected": hand_affected,
+"auto_scale": false,
+"peak_barrier": true,
+"is_parent": c.is_parent,
+"use_vector_filter": c.use_vector_filter,
+"z_push": ((!c.is_parent && (_poseNet.body_collider.head.reaction_type == 'z_push')) ? c.z_push : null),
+"magnet_id": 'head_collider' + idx,
+"keep_validation_state_until_reset": true,
+on_hit: !c.is_parent && colliders_for_hands.record_hit
+  },
+
+  (c.line_end) ? {
+"magnet_type": "line",
+"line_end": {"x":c.line_end[0], "y":c.line_end[1], "z":c.line_end[2]},
+"effective_distance": radius,
+"peak_distance": radius,
+  } : {
+"radius": radius,
+"peak_radius": radius
+  });
+});
+//console.log(colliders)
+return colliders;
+      };
+    })()
+  };
+}
+colliders_for_hands.head.reset();
+
+if (!colliders_for_hands.chest) {
+  const breast_radius = modelX.para.shoulder_width / 4;
+  colliders_for_hands.chest = {
+    get scale() { return _poseNet.body_collider.chest.size_percent/100; },
+
+    children: [-1,1].map(sign=>{
+      function validate(pos, vector_add, rot_base) {
+return true;
+      }
+
+      const y = modelX.get_bone_origin_by_MMD_name('首')[1] - modelX.para.spine_length/3 - modelX.get_bone_origin_by_MMD_name('上半身2')[1];
+//DEBUG_show(modelX.para.spine_length/3+'/'+breast_radius*2,0,1)
+      return {
+bone: 'chest',
+offset: [breast_radius*sign, y, breast_radius*0.5],
+radius: breast_radius,
+z_push: { validate:validate, rotation_base:true }
+      }
+    }),
+
+    generate_colliders: (()=>{
+      let scale;
+      let colliders;
+
+      return function () {
+if (!_poseNet.body_collider.chest.enabled) return [];
+
+if (scale === this.scale) return colliders;
+scale = this.scale;
+
+colliders = (this.children||[]).map(c=>{
+  const hand_affected = colliders_for_hands.generate_hand_parameters();
+  const radius = c.radius*scale*scale_to_MMD + hand_affected.left.offset.x;
+
+  return {
+"type": "bone",
+"name": c.bone,
+"offset": {"x":c.offset[0]*(1-MMD_SA.THREEX._THREE.Math.clamp(scale-1, 0,1)*0.5), "y":c.offset[1], "z":c.offset[2]*(1+MMD_SA.THREEX._THREE.Math.clamp(scale-1, 0,2)*0.5)},
+"hand_affected": hand_affected,
+"auto_scale": false,
+"radius": radius,
+"peak_radius": radius,
+"peak_barrier": true,
+"is_parent": c.is_parent,
+"z_push": c.z_push,
+//"use_reference_point_filter": true,
+on_hit: colliders_for_hands.record_hit
+  };
+});
+      };
+    })()
+  };
+}
+
+if (!colliders_for_hands.waist) {
+  const radius = modelX.para.shoulder_width / 4;
+
+  colliders_for_hands.waist = {
+    get scale() { return _poseNet.body_collider.waist.size_percent/100; },
+
+    children: [0,-radius*0.75,-radius*1.5].map(y=>{
+      function validate(pos, vector_add, rot_base) {
+return true;
+      }
+
+      return {
+bone: 'spine',
+offset: [-radius*1, y, -radius*0.5],
+radius: radius*1.5,
+line_end: [radius*1*2, 0, 0],
+z_push: { validate:validate, rotation_base:true }
+      }
+    }),
+
+    generate_colliders: (()=>{
+      let scale;
+      let colliders;
+
+      return function () {
+if (!_poseNet.body_collider.waist.enabled) return [];
+
+if (scale === this.scale) return colliders;
+scale = this.scale;
+
+colliders = (this.children||[]).map(c=>{
+  const hand_affected = colliders_for_hands.generate_hand_parameters();
+  const radius = c.radius*scale*scale_to_MMD + hand_affected.left.offset.x;
+
+  return {
+"type": "bone",
+"name": c.bone,
+"offset": {"x":c.offset[0], "y":c.offset[1], "z":c.offset[2]},
+"hand_affected": hand_affected,
+"magnet_type": "line",
+"line_end": {"x":c.line_end[0], "y":c.line_end[1], "z":c.line_end[2]},
+"auto_scale": false,
+"effective_distance": radius,
+"peak_distance": radius,
+"peak_barrier": true,
+"is_parent": c.is_parent,
+"use_vector_filter": true,
+"z_push": c.z_push,
+on_hit: colliders_for_hands.record_hit
+  };
+});
+      };
+    })()
+  };
+}
+
+if (!colliders_for_hands.hip) {
+  const hip_radius = modelX.get_bone_origin_by_MMD_name('左足')[0];
+
+  const hip_center_offset = MMD_SA.TEMP_v3.copy(modelX.para.hip_center_offset).negate();
+
+  colliders_for_hands.hip = {
+    get scale() { return _poseNet.body_collider.hip.size_percent/100; },
+/*
+    children: ['leftUpperLeg','rightUpperLeg'].map(bone=>{
+      return {
+bone: bone,
+offset: [0, 0, 0],
+radius: hip_radius,
+line_end: [0, -hip_radius*2, 0]
+      };
+    }),
+*/
+
+    children: [
+      {
+bone: '下半身|hips',
+offset: [hip_center_offset.x-hip_radius*0.5, hip_center_offset.y-hip_radius, hip_center_offset.z-hip_radius*0.5],
+radius: hip_radius*0.6,
+line_end: [hip_radius+hip_radius*0.5*2, 0, 0],
+z_push: { validate:()=>true, rotation_base:true }
+      },
+      {
+bone: '下半身|hips',
+offset: [hip_center_offset.x-hip_radius*0.5, hip_center_offset.y-hip_radius, hip_center_offset.z],//-hip_radius*0.5],
+radius: hip_radius*1.2,
+line_end: [hip_radius+hip_radius*0.5*2, 0, 0]
+      }
+    ],
+
+    generate_colliders: (()=>{
+      let scale;
+      let colliders;
+
+      return function () {
+if (!_poseNet.body_collider.hip.enabled) return [];
+
+if (scale === this.scale) return colliders;
+scale = this.scale;
+
+colliders = (this.children||[]).map((c,i)=>{
+  const hand_affected = colliders_for_hands.generate_hand_parameters();
+//((i==1) ? scale : Math.min(scale,1))
+  const radius = c.radius*scale*scale_to_MMD + hand_affected.left.offset.x;
+
+  return {
+"type": "bone",
+"name": c.bone,
+"offset": {"x":c.offset[0], "y":c.offset[1] - Math.max(scale-1,0) * c.radius*0.5, "z":c.offset[2]},
+"hand_affected": hand_affected,
+"magnet_type": "line",
+"line_end": {"x":c.line_end[0], "y":c.line_end[1], "z":c.line_end[2]},
+"auto_scale": false,
+"effective_distance": radius,
+"peak_distance": radius,
+"peak_barrier": true,
+"is_parent": c.is_parent,
+"use_vector_filter": true,
+"z_push": c.z_push,
+on_hit: colliders_for_hands.record_hit
+  };
+});
+      };
+    })()
+  };
+}
+
+//colliders_for_hands.head=null;
+//colliders_for_hands.chest=null;
+//colliders_for_hands.waist=null;
+//colliders_for_hands.hip=null;
+      },
 
 // headless_mode
       press_key: function (k) {
@@ -14715,6 +15134,7 @@ this.options_default = Object.clone(options);
     #VMC_ready;
     #VMC_sender_enabled=false;
     #VMC_receiver_enabled=false;
+    #VMC_delay = 0;
 
     get enabled() { return this.#VMC_enabled; }
     set enabled(v) {
@@ -14780,6 +15200,9 @@ else {
     get ready() { return this.#VMC_enabled && this.#VMC_ready; }
     set ready(v) { this.#VMC_ready = v; }
 
+    get delay() { return this.#VMC_delay; }
+    set delay(v) { this.#VMC_delay = v || 0; }
+
     init() {
 if (this.#VMC_initialized) return;
 this.#VMC_initialized = true;
@@ -14809,6 +15232,37 @@ return new OSC.Bundle([...args], 0);
 
     send(...args) {
 this.vmc.send(...args);
+    }
+
+//const msg_obj = MMD_SA.OSC.VMC.time_control({ pos_msgs, bone_msgs, morph_msgs, camera_msgs, tracker_msgs });
+    static msg_obj_list = [];
+
+    time_control(msg_obj) {
+msg_obj.timestamp = RAF_timestamp;
+VMC.msg_obj_list.unshift(msg_obj);
+
+const target_timestamp = RAF_timestamp - MMD_SA.OSC.VMC.delay;
+
+let msg_obj_timed;
+
+for (let i = 0, i_max = VMC.msg_obj_list.length; i < i_max; i++) {
+  const _msg_obj = VMC.msg_obj_list[i];
+  let time_matched = _msg_obj.timestamp <= target_timestamp;
+  if (time_matched || (i == i_max-1)) {
+    msg_obj_timed = _msg_obj;
+    if (time_matched) {
+      VMC.msg_obj_list.length = i;
+    }
+    else if (i > 0) {
+      const msg_obj_previous = VMC.msg_obj_list[i-1];
+      if (Math.abs(msg_obj_previous.timestamp - target_timestamp) < Math.abs(msg_obj.timestamp - target_timestamp))
+        msg_obj_timed = msg_obj_previous;
+    }
+    break;
+  }
+}
+
+return msg_obj_timed;
     }
   }
 

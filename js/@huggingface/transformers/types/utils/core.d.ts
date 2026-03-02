@@ -130,6 +130,12 @@ export function product(...a: any[][]): any[];
  */
 export function calculateReflectOffset(i: number, w: number): number;
 /**
+ * Save blob file on the web.
+ * @param {string} path The path to save the blob to
+ * @param {Blob} blob The blob to save
+ */
+export function saveBlob(path: string, blob: Blob): void;
+/**
  *
  * @param {Object} o
  * @param {string[]} props

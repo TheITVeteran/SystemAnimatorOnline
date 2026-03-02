@@ -2039,6 +2039,20 @@
 						}
 					}
 				},
+				"delay": {
+					"_translation_": {
+						"_default_": "Delay",
+						"ja": "遅延",
+						"zh": "延遲"
+					},
+					"tooltip": {
+						"_translation_": {
+							"_default_": "Delay (press ➕➖ key to change value):\nThis setting applies a delay before sending out the VMC messages, which can be used to offset the audio delay commonly occured in metaverse apps like VRChat and Cluster, so that the avatar motion and audio can be in sync when viewed by other users. Default is \"0ms\".",
+							"ja": "遅延 (➕➖キーで値を変更する):\nこの設定は、VMC メッセージを送信する前に遅延を適用します。 これは、VRChat やクラスターなどのメタバース アプリで一般的に発生する音声遅延をオフセットするために使用でき、他のユーザーが表示したときにアバターのモーションと音声を同期できます。 デフォルトは「0ms」です。",
+							"zh": "延遲 (按➕➖ 鍵更改數值):\n此設定在發送 VMC 訊息之前會施加延遲，可用於抵消 VRChat 和 Cluster 等元宇宙應用中常見的音訊延遲，以便其他使用者在觀看你的人物時動作和音訊可以同步。 預設是「0ms」。"
+						}
+					}
+				},
 				"3D_avatar_display": {
 					"_translation_": {
 						"_default_": "3D avatar display",
@@ -3500,7 +3514,7 @@
 							},
 							"list": {
 								"_translation_": {
-									"_default_": "NewruGuru, Kai, Nymph, KuraiNoOni, LouLi Lou, skeh, Swoonifer, Nyaarium, Kyonko_VT, ObsidianMaker, Catt, CoCoNo,"
+									"_default_": "NewruGuru, Kai, Nymph, KuraiNoOni, LouLi Lou, skeh, Swoonifer, Nyaarium, Kyonko_VT, ObsidianMaker, Catt, ARON, azhawker, CoCoNo,"
 								}
 							}
 						}

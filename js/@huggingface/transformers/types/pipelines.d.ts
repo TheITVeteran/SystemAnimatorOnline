@@ -1261,7 +1261,7 @@ declare const TextToAudioPipeline_base: new (options: TextToAudioPipelineConstru
  * const synthesizer = await pipeline('text-to-speech', 'Xenova/speecht5_tts', { quantized: false });
  * const speaker_embeddings = 'https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/speaker_embeddings.bin';
  * const out = await synthesizer('Hello, my dog is cute', { speaker_embeddings });
- * // {
+ * // RawAudio {
  * //   audio: Float32Array(26112) [-0.00005657337896991521, 0.00020583874720614403, ...],
  * //   sampling_rate: 16000
  * // }
@@ -1281,7 +1281,7 @@ declare const TextToAudioPipeline_base: new (options: TextToAudioPipelineConstru
  * ```javascript
  * const synthesizer = await pipeline('text-to-speech', 'Xenova/mms-tts-fra');
  * const out = await synthesizer('Bonjour');
- * // {
+ * // RawAudio {
  * //   audio: Float32Array(23808) [-0.00037693005288019776, 0.0003325853613205254, ...],
  * //   sampling_rate: 16000
  * // }
@@ -1291,16 +1291,10 @@ export class TextToAudioPipeline extends TextToAudioPipeline_base {
     DEFAULT_VOCODER_ID: string;
     vocoder: PreTrainedModel;
     _call(texts: string | string[], options: TextToAudioPipelineOptions): Promise<TextToAudioOutput>;
-    _call_text_to_waveform(text_inputs: any): Promise<{
-        audio: any;
-        sampling_rate: any;
-    }>;
+    _call_text_to_waveform(text_inputs: any): Promise<RawAudio>;
     _call_text_to_spectrogram(text_inputs: any, { speaker_embeddings }: {
         speaker_embeddings: any;
-    }): Promise<{
-        audio: any;
-        sampling_rate: any;
-    }>;
+    }): Promise<RawAudio>;
 }
 declare const ImageToImagePipeline_base: new (options: ImagePipelineConstructorArgs) => ImageToImagePipelineType;
 /**
@@ -2123,6 +2117,7 @@ import { PreTrainedModel } from './models.js';
 import { PreTrainedTokenizer } from './tokenizers.js';
 import { Processor } from './base/processing_utils.js';
 import { Tensor } from './utils/tensor.js';
+import { RawAudio } from './utils/audio.js';
 import { RawImage } from './utils/image.js';
 declare const SUPPORTED_TASKS: Readonly<{
     "text-classification": {

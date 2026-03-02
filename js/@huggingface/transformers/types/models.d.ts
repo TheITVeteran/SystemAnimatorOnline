@@ -1666,6 +1666,18 @@ export class LlamaModel extends LlamaPreTrainedModel {
 }
 export class LlamaForCausalLM extends LlamaPreTrainedModel {
 }
+export class HeliumPreTrainedModel extends PreTrainedModel {
+}
+export class HeliumModel extends HeliumPreTrainedModel {
+}
+export class HeliumForCausalLM extends HeliumPreTrainedModel {
+}
+export class GlmPreTrainedModel extends PreTrainedModel {
+}
+export class GlmModel extends GlmPreTrainedModel {
+}
+export class GlmForCausalLM extends GlmPreTrainedModel {
+}
 export class ExaonePreTrainedModel extends PreTrainedModel {
 }
 export class ExaoneModel extends ExaonePreTrainedModel {
@@ -2465,6 +2477,10 @@ export class Dinov2WithRegistersForImageClassification extends Dinov2WithRegiste
      */
     _call(model_inputs: any): Promise<SequenceClassifierOutput>;
 }
+export class GroundingDinoPreTrainedModel extends PreTrainedModel {
+}
+export class GroundingDinoForObjectDetection extends GroundingDinoPreTrainedModel {
+}
 export class YolosPreTrainedModel extends PreTrainedModel {
 }
 export class YolosModel extends YolosPreTrainedModel {
@@ -3072,6 +3088,10 @@ export class WavLMForAudioFrameClassification extends WavLMPreTrainedModel {
      * @returns {Promise<TokenClassifierOutput>} An object containing the model's output logits for sequence classification.
      */
     _call(model_inputs: any): Promise<TokenClassifierOutput>;
+}
+export class StyleTextToSpeech2PreTrainedModel extends PreTrainedModel {
+}
+export class StyleTextToSpeech2Model extends StyleTextToSpeech2PreTrainedModel {
 }
 /**
  * An abstract class to handle weights initialization and a simple interface for downloading and loading pretrained models.

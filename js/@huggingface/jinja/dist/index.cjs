@@ -699,18 +699,19 @@ function parse(tokens) {
     return left;
   }
   function parseCallMemberExpression() {
-    const member = parseMemberExpression();
+    const member = parseMemberExpression(parsePrimaryExpression());
     if (is(TOKEN_TYPES.OpenParen)) {
       return parseCallExpression(member);
     }
     return member;
   }
   function parseCallExpression(callee) {
-    let callExpression = new CallExpression(callee, parseArgs());
+    let expression = new CallExpression(callee, parseArgs());
+    expression = parseMemberExpression(expression);
     if (is(TOKEN_TYPES.OpenParen)) {
-      callExpression = parseCallExpression(callExpression);
+      expression = parseCallExpression(expression);
     }
-    return callExpression;
+    return expression;
   }
   function parseArgs() {
     expect(TOKEN_TYPES.OpenParen, "Expected opening parenthesis for arguments list");
@@ -764,8 +765,7 @@ function parse(tokens) {
     }
     return slices[0];
   }
-  function parseMemberExpression() {
-    let object = parsePrimaryExpression();
+  function parseMemberExpression(object) {
     while (is(TOKEN_TYPES.Dot) || is(TOKEN_TYPES.OpenSquareBracket)) {
       const operator = tokens[current];
       ++current;
@@ -989,6 +989,41 @@ var StringValue = class extends RuntimeValue {
       "lstrip",
       new FunctionValue(() => {
         return new StringValue(this.value.trimStart());
+      })
+    ],
+    [
+      "split",
+      // follows Python's `str.split(sep=None, maxsplit=-1)` function behavior
+      // https://docs.python.org/3.13/library/stdtypes.html#str.split
+      new FunctionValue((args) => {
+        const sep = args[0] ?? new NullValue();
+        if (!(sep instanceof StringValue || sep instanceof NullValue)) {
+          throw new Error("sep argument must be a string or null");
+        }
+        const maxsplit = args[1] ?? new NumericValue(-1);
+        if (!(maxsplit instanceof NumericValue)) {
+          throw new Error("maxsplit argument must be a number");
+        }
+        let result = [];
+        if (sep instanceof NullValue) {
+          const text = this.value.trimStart();
+          for (const { 0: match, index } of text.matchAll(/\S+/g)) {
+            if (maxsplit.value !== -1 && result.length >= maxsplit.value && index !== void 0) {
+              result.push(match + text.slice(index + match.length));
+              break;
+            }
+            result.push(match);
+          }
+        } else {
+          if (sep.value === "") {
+            throw new Error("empty separator");
+          }
+          result = this.value.split(sep.value);
+          if (maxsplit.value !== -1 && result.length > maxsplit.value) {
+            result.push(result.splice(maxsplit.value).join(sep.value));
+          }
+        }
+        return new ArrayValue(result.map((part) => new StringValue(part)));
       })
     ]
   ]);
@@ -1326,6 +1361,8 @@ var Interpreter = class {
                 }
               })
             );
+          case "join":
+            return new StringValue(operand.value.map((x) => x.value).join(""));
           default:
             throw new Error(`Unknown ArrayValue filter: ${filter.value}`);
         }
@@ -1352,6 +1389,7 @@ var Interpreter = class {
                 )
               ).join("\n")
             );
+          case "join":
           case "string":
             return operand;
           default:
@@ -1390,6 +1428,21 @@ var Interpreter = class {
           throw new Error("If set, indent must be a number");
         }
         return new StringValue(toJSON(operand, indent.value));
+      } else if (filterName === "join") {
+        let value;
+        if (operand instanceof StringValue) {
+          value = Array.from(operand.value);
+        } else if (operand instanceof ArrayValue) {
+          value = operand.value.map((x) => x.value);
+        } else {
+          throw new Error(`Cannot apply filter "${filterName}" to type: ${operand.type}`);
+        }
+        const [args, kwargs] = this.evaluateArguments(filter.args, environment);
+        const separator = args.at(0) ?? kwargs.get("separator") ?? new StringValue("");
+        if (!(separator instanceof StringValue)) {
+          throw new Error("separator must be a string");
+        }
+        return new StringValue(value.join(separator.value));
       }
       if (operand instanceof ArrayValue) {
         switch (filterName) {
@@ -1851,8 +1904,10 @@ var Template = class {
       throw new Error(args);
     });
     env.set("range", range);
-    for (const [key, value] of Object.entries(items)) {
-      env.set(key, value);
+    if (items) {
+      for (const [key, value] of Object.entries(items)) {
+        env.set(key, value);
+      }
     }
     const interpreter = new Interpreter(env);
     const result = interpreter.run(this.parsed);

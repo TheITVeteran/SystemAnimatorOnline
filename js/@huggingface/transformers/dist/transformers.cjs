@@ -752,18 +752,19 @@ function parse(tokens) {
     return left;
   }
   function parseCallMemberExpression() {
-    const member = parseMemberExpression();
+    const member = parseMemberExpression(parsePrimaryExpression());
     if (is(TOKEN_TYPES.OpenParen)) {
       return parseCallExpression(member);
     }
     return member;
   }
   function parseCallExpression(callee) {
-    let callExpression = new CallExpression(callee, parseArgs());
+    let expression = new CallExpression(callee, parseArgs());
+    expression = parseMemberExpression(expression);
     if (is(TOKEN_TYPES.OpenParen)) {
-      callExpression = parseCallExpression(callExpression);
+      expression = parseCallExpression(expression);
     }
-    return callExpression;
+    return expression;
   }
   function parseArgs() {
     expect(TOKEN_TYPES.OpenParen, "Expected opening parenthesis for arguments list");
@@ -817,8 +818,7 @@ function parse(tokens) {
     }
     return slices[0];
   }
-  function parseMemberExpression() {
-    let object = parsePrimaryExpression();
+  function parseMemberExpression(object) {
     while (is(TOKEN_TYPES.Dot) || is(TOKEN_TYPES.OpenSquareBracket)) {
       const operator = tokens[current];
       ++current;
@@ -1042,6 +1042,41 @@ var StringValue = class extends RuntimeValue {
       "lstrip",
       new FunctionValue(() => {
         return new StringValue(this.value.trimStart());
+      })
+    ],
+    [
+      "split",
+      // follows Python's `str.split(sep=None, maxsplit=-1)` function behavior
+      // https://docs.python.org/3.13/library/stdtypes.html#str.split
+      new FunctionValue((args) => {
+        const sep = args[0] ?? new NullValue();
+        if (!(sep instanceof StringValue || sep instanceof NullValue)) {
+          throw new Error("sep argument must be a string or null");
+        }
+        const maxsplit = args[1] ?? new NumericValue(-1);
+        if (!(maxsplit instanceof NumericValue)) {
+          throw new Error("maxsplit argument must be a number");
+        }
+        let result = [];
+        if (sep instanceof NullValue) {
+          const text = this.value.trimStart();
+          for (const { 0: match, index } of text.matchAll(/\S+/g)) {
+            if (maxsplit.value !== -1 && result.length >= maxsplit.value && index !== void 0) {
+              result.push(match + text.slice(index + match.length));
+              break;
+            }
+            result.push(match);
+          }
+        } else {
+          if (sep.value === "") {
+            throw new Error("empty separator");
+          }
+          result = this.value.split(sep.value);
+          if (maxsplit.value !== -1 && result.length > maxsplit.value) {
+            result.push(result.splice(maxsplit.value).join(sep.value));
+          }
+        }
+        return new ArrayValue(result.map((part) => new StringValue(part)));
       })
     ]
   ]);
@@ -1379,6 +1414,8 @@ var Interpreter = class {
                 }
               })
             );
+          case "join":
+            return new StringValue(operand.value.map((x) => x.value).join(""));
           default:
             throw new Error(`Unknown ArrayValue filter: ${filter.value}`);
         }
@@ -1405,6 +1442,7 @@ var Interpreter = class {
                 )
               ).join("\n")
             );
+          case "join":
           case "string":
             return operand;
           default:
@@ -1443,6 +1481,21 @@ var Interpreter = class {
           throw new Error("If set, indent must be a number");
         }
         return new StringValue(toJSON(operand, indent.value));
+      } else if (filterName === "join") {
+        let value;
+        if (operand instanceof StringValue) {
+          value = Array.from(operand.value);
+        } else if (operand instanceof ArrayValue) {
+          value = operand.value.map((x) => x.value);
+        } else {
+          throw new Error(`Cannot apply filter "${filterName}" to type: ${operand.type}`);
+        }
+        const [args, kwargs] = this.evaluateArguments(filter.args, environment);
+        const separator = args.at(0) ?? kwargs.get("separator") ?? new StringValue("");
+        if (!(separator instanceof StringValue)) {
+          throw new Error("separator must be a string");
+        }
+        return new StringValue(value.join(separator.value));
       }
       if (operand instanceof ArrayValue) {
         switch (filterName) {
@@ -1904,8 +1957,10 @@ var Template = class {
       throw new Error(args);
     });
     env.set("range", range);
-    for (const [key, value] of Object.entries(items)) {
-      env.set(key, value);
+    if (items) {
+      for (const [key, value] of Object.entries(items)) {
+        env.set(key, value);
+      }
     }
     const interpreter = new Interpreter(env);
     const result = interpreter.run(this.parsed);
@@ -4207,6 +4262,7 @@ function validate_audio_inputs(audio, feature_extractor) {
 __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   ImageProcessor: () => (/* binding */ ImageProcessor),
+/* harmony export */   center_to_corners_format: () => (/* binding */ center_to_corners_format),
 /* harmony export */   post_process_instance_segmentation: () => (/* binding */ post_process_instance_segmentation),
 /* harmony export */   post_process_object_detection: () => (/* binding */ post_process_object_detection),
 /* harmony export */   post_process_panoptic_segmentation: () => (/* binding */ post_process_panoptic_segmentation),
@@ -5440,6 +5496,17 @@ class Processor extends _utils_generic_js__WEBPACK_IMPORTED_MODULE_1__.Callable 
         return this.tokenizer.batch_decode(...args);
     }
 
+    /**
+     * @param {Parameters<PreTrainedTokenizer['decode']>} args
+     * @returns {ReturnType<PreTrainedTokenizer['decode']>}
+     */
+    decode(...args) {
+        if (!this.tokenizer) {
+            throw new Error('Unable to decode without a tokenizer.');
+        }
+        return this.tokenizer.decode(...args);
+    }
+
 
     /**
      * Calls the feature_extractor function with the given input.
@@ -5635,6 +5702,8 @@ function getNormalizedConfig(config) {
             break;
         case 'gemma':
         case 'gemma2':
+        case 'glm':
+        case 'helium':
             mapping['num_heads'] = 'num_key_value_heads';
             mapping['num_layers'] = 'num_hidden_layers';
             mapping['dim_kv'] = 'head_dim';
@@ -5707,12 +5776,17 @@ function getNormalizedConfig(config) {
             mapping['encoder_hidden_size'] = mapping['decoder_hidden_size'] = 'd_model';
             break;
         case 'musicgen_decoder':
-        case 'moonshine':
             mapping['num_encoder_layers'] = mapping['num_decoder_layers'] = 'num_hidden_layers';
             mapping['num_encoder_heads'] = mapping['num_decoder_heads'] = 'num_attention_heads';
             mapping['encoder_hidden_size'] = mapping['decoder_hidden_size'] = 'hidden_size';
             break;
-
+        case 'moonshine':
+            mapping['num_decoder_layers'] = 'decoder_num_hidden_layers';
+            mapping['num_decoder_heads'] = 'decoder_num_key_value_heads';
+            mapping['num_encoder_layers'] = 'encoder_num_hidden_layers';
+            mapping['num_encoder_heads'] = 'encoder_num_key_value_heads';
+            mapping['encoder_hidden_size'] = mapping['decoder_hidden_size'] = 'hidden_size';
+            break;
         case 'vision-encoder-decoder':
             // @ts-expect-error TS2339
             const decoderConfig = getNormalizedConfig(config.decoder);
@@ -5958,7 +6032,7 @@ __webpack_require__.r(__webpack_exports__);
 
 
 
-const VERSION = '3.2.4';
+const VERSION = '3.3.3';
 
 // Check if various APIs are available (depends on environment)
 const IS_BROWSER_ENV = typeof window !== "undefined" && typeof window.document !== "undefined";
@@ -6092,7 +6166,6 @@ const env = {
 function isEmpty(obj) {
     return Object.keys(obj).length === 0;
 }
-
 
 
 /***/ }),
@@ -7709,6 +7782,7 @@ class TextStreamer extends BaseStreamer {
      * @param {import('../tokenizers.js').PreTrainedTokenizer} tokenizer
      * @param {Object} options
      * @param {boolean} [options.skip_prompt=false] Whether to skip the prompt tokens
+     * @param {boolean} [options.skip_special_tokens=true] Whether to skip special tokens when decoding
      * @param {function(string): void} [options.callback_function=null] Function to call when a piece of text is ready to display
      * @param {function(bigint[]): void} [options.token_callback_function=null] Function to call when a new token is generated
      * @param {Object} [options.decode_kwargs={}] Additional keyword arguments to pass to the tokenizer's decode method
@@ -7717,6 +7791,7 @@ class TextStreamer extends BaseStreamer {
         skip_prompt = false,
         callback_function = null,
         token_callback_function = null,
+        skip_special_tokens = true,
         decode_kwargs = {},
         ...kwargs
     } = {}) {
@@ -7725,7 +7800,7 @@ class TextStreamer extends BaseStreamer {
         this.skip_prompt = skip_prompt;
         this.callback_function = callback_function ?? stdout_write;
         this.token_callback_function = token_callback_function;
-        this.decode_kwargs = { ...decode_kwargs, ...kwargs };
+        this.decode_kwargs = { skip_special_tokens, ...decode_kwargs, ...kwargs };
 
         // variables used in the streaming process
         this.token_cache = [];
@@ -7841,9 +7916,10 @@ class WhisperTextStreamer extends TextStreamer {
     } = {}) {
         super(tokenizer, {
             skip_prompt,
+            skip_special_tokens,
             callback_function,
             token_callback_function,
-            decode_kwargs: { skip_special_tokens, ...decode_kwargs },
+            decode_kwargs,
         });
         this.timestamp_begin = tokenizer.timestamp_begin;
 
@@ -8094,11 +8170,19 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   GemmaForCausalLM: () => (/* binding */ GemmaForCausalLM),
 /* harmony export */   GemmaModel: () => (/* binding */ GemmaModel),
 /* harmony export */   GemmaPreTrainedModel: () => (/* binding */ GemmaPreTrainedModel),
+/* harmony export */   GlmForCausalLM: () => (/* binding */ GlmForCausalLM),
+/* harmony export */   GlmModel: () => (/* binding */ GlmModel),
+/* harmony export */   GlmPreTrainedModel: () => (/* binding */ GlmPreTrainedModel),
 /* harmony export */   GraniteForCausalLM: () => (/* binding */ GraniteForCausalLM),
 /* harmony export */   GraniteModel: () => (/* binding */ GraniteModel),
 /* harmony export */   GranitePreTrainedModel: () => (/* binding */ GranitePreTrainedModel),
+/* harmony export */   GroundingDinoForObjectDetection: () => (/* binding */ GroundingDinoForObjectDetection),
+/* harmony export */   GroundingDinoPreTrainedModel: () => (/* binding */ GroundingDinoPreTrainedModel),
 /* harmony export */   GroupViTModel: () => (/* binding */ GroupViTModel),
 /* harmony export */   GroupViTPreTrainedModel: () => (/* binding */ GroupViTPreTrainedModel),
+/* harmony export */   HeliumForCausalLM: () => (/* binding */ HeliumForCausalLM),
+/* harmony export */   HeliumModel: () => (/* binding */ HeliumModel),
+/* harmony export */   HeliumPreTrainedModel: () => (/* binding */ HeliumPreTrainedModel),
 /* harmony export */   HieraForImageClassification: () => (/* binding */ HieraForImageClassification),
 /* harmony export */   HieraModel: () => (/* binding */ HieraModel),
 /* harmony export */   HieraPreTrainedModel: () => (/* binding */ HieraPreTrainedModel),
@@ -8305,6 +8389,8 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   Starcoder2ForCausalLM: () => (/* binding */ Starcoder2ForCausalLM),
 /* harmony export */   Starcoder2Model: () => (/* binding */ Starcoder2Model),
 /* harmony export */   Starcoder2PreTrainedModel: () => (/* binding */ Starcoder2PreTrainedModel),
+/* harmony export */   StyleTextToSpeech2Model: () => (/* binding */ StyleTextToSpeech2Model),
+/* harmony export */   StyleTextToSpeech2PreTrainedModel: () => (/* binding */ StyleTextToSpeech2PreTrainedModel),
 /* harmony export */   Swin2SRForImageSuperResolution: () => (/* binding */ Swin2SRForImageSuperResolution),
 /* harmony export */   Swin2SRModel: () => (/* binding */ Swin2SRModel),
 /* harmony export */   Swin2SRPreTrainedModel: () => (/* binding */ Swin2SRPreTrainedModel),
@@ -8882,14 +8968,23 @@ async function encoderForward(self, model_inputs) {
         encoderFeeds.inputs_embeds = await self.encode_text({ input_ids: model_inputs.input_ids });
     }
     if (session.inputNames.includes('token_type_ids') && !encoderFeeds.token_type_ids) {
+        if (!encoderFeeds.input_ids) {
+            throw new Error('Both `input_ids` and `token_type_ids` are missing in the model inputs.');
+        }
         // Assign default `token_type_ids` (all zeroes) to the `encoderFeeds` if the model expects it,
         // but they weren't created by the tokenizer.
-        encoderFeeds.token_type_ids = new _utils_tensor_js__WEBPACK_IMPORTED_MODULE_9__.Tensor(
-            'int64',
-            new BigInt64Array(encoderFeeds.input_ids.data.length),
-            encoderFeeds.input_ids.dims
-        )
+        encoderFeeds.token_type_ids = (0,_utils_tensor_js__WEBPACK_IMPORTED_MODULE_9__.zeros_like)(encoderFeeds.input_ids);
     }
+    if (session.inputNames.includes('pixel_mask') && !encoderFeeds.pixel_mask) {
+        if (!encoderFeeds.pixel_values) {
+            throw new Error('Both `pixel_values` and `pixel_mask` are missing in the model inputs.');
+        }
+        // Assign default `pixel_mask` (all ones) to the `encoderFeeds` if the model expects it,
+        // but they weren't created by the processor.
+        const dims = encoderFeeds.pixel_values.dims;
+        encoderFeeds.pixel_mask = (0,_utils_tensor_js__WEBPACK_IMPORTED_MODULE_9__.ones)([dims[0], dims[2], dims[3]]);
+    }
+    
     return await sessionRun(session, encoderFeeds);
 }
 
@@ -12626,6 +12721,19 @@ class LlamaModel extends LlamaPreTrainedModel { }
 class LlamaForCausalLM extends LlamaPreTrainedModel { }
 //////////////////////////////////////////////////
 
+//////////////////////////////////////////////////
+// Helium models
+class HeliumPreTrainedModel extends PreTrainedModel { }
+class HeliumModel extends HeliumPreTrainedModel { }
+class HeliumForCausalLM extends HeliumPreTrainedModel { }
+//////////////////////////////////////////////////
+
+//////////////////////////////////////////////////
+// Glm models
+class GlmPreTrainedModel extends PreTrainedModel { }
+class GlmModel extends GlmPreTrainedModel { }
+class GlmForCausalLM extends GlmPreTrainedModel { }
+//////////////////////////////////////////////////
 
 //////////////////////////////////////////////////
 // EXAONE models
@@ -13778,6 +13886,8 @@ class Dinov2WithRegistersForImageClassification extends Dinov2WithRegistersPreTr
     }
 }
 //////////////////////////////////////////////////
+class GroundingDinoPreTrainedModel extends PreTrainedModel { }
+class GroundingDinoForObjectDetection extends GroundingDinoPreTrainedModel { }
 
 //////////////////////////////////////////////////
 class YolosPreTrainedModel extends PreTrainedModel { }
@@ -14475,6 +14585,9 @@ class WavLMForAudioFrameClassification extends WavLMPreTrainedModel {
         return new TokenClassifierOutput(await super._call(model_inputs));
     }
 }
+
+class StyleTextToSpeech2PreTrainedModel extends PreTrainedModel { }
+class StyleTextToSpeech2Model extends StyleTextToSpeech2PreTrainedModel { }
 
 //////////////////////////////////////////////////
 // SpeechT5 models
@@ -15439,6 +15552,8 @@ const MODEL_MAPPING_NAMES_ENCODER_ONLY = new Map([
 
     ['maskformer', ['MaskFormerModel', MaskFormerModel]],
     ['mgp-str', ['MgpstrForSceneTextRecognition', MgpstrForSceneTextRecognition]],
+
+    ['style_text_to_speech_2', ['StyleTextToSpeech2Model', StyleTextToSpeech2Model]],
 ]);
 
 const MODEL_MAPPING_NAMES_ENCODER_DECODER = new Map([
@@ -15473,6 +15588,8 @@ const MODEL_MAPPING_NAMES_DECODER_ONLY = new Map([
     ['cohere', ['CohereModel', CohereModel]],
     ['gemma', ['GemmaModel', GemmaModel]],
     ['gemma2', ['Gemma2Model', Gemma2Model]],
+    ['helium', ['HeliumModel', HeliumModel]],
+    ['glm', ['GlmModel', GlmModel]],
     ['openelm', ['OpenELMModel', OpenELMModel]],
     ['qwen2', ['Qwen2Model', Qwen2Model]],
     ['phi', ['PhiModel', PhiModel]],
@@ -15569,6 +15686,8 @@ const MODEL_FOR_CAUSAL_LM_MAPPING_NAMES = new Map([
     ['cohere', ['CohereForCausalLM', CohereForCausalLM]],
     ['gemma', ['GemmaForCausalLM', GemmaForCausalLM]],
     ['gemma2', ['Gemma2ForCausalLM', Gemma2ForCausalLM]],
+    ['helium', ['HeliumForCausalLM', HeliumForCausalLM]],
+    ['glm', ['GlmForCausalLM', GlmForCausalLM]],
     ['openelm', ['OpenELMForCausalLM', OpenELMForCausalLM]],
     ['qwen2', ['Qwen2ForCausalLM', Qwen2ForCausalLM]],
     ['phi', ['PhiForCausalLM', PhiForCausalLM]],
@@ -15683,6 +15802,7 @@ const MODEL_FOR_OBJECT_DETECTION_MAPPING_NAMES = new Map([
 const MODEL_FOR_ZERO_SHOT_OBJECT_DETECTION_MAPPING_NAMES = new Map([
     ['owlvit', ['OwlViTForObjectDetection', OwlViTForObjectDetection]],
     ['owlv2', ['Owlv2ForObjectDetection', Owlv2ForObjectDetection]],
+    ['grounding-dino', ['GroundingDinoForObjectDetection', GroundingDinoForObjectDetection]],
 ]);
 
 const MODEL_FOR_IMAGE_SEGMENTATION_MAPPING_NAMES = new Map([
@@ -17259,6 +17379,170 @@ class GLPNFeatureExtractor extends _base_image_processors_utils_js__WEBPACK_IMPO
 
 /***/ }),
 
+/***/ "./src/models/grounding_dino/image_processing_grounding_dino.js":
+/*!**********************************************************************!*\
+  !*** ./src/models/grounding_dino/image_processing_grounding_dino.js ***!
+  \**********************************************************************/
+/***/ ((__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) => {
+
+"use strict";
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   GroundingDinoImageProcessor: () => (/* binding */ GroundingDinoImageProcessor)
+/* harmony export */ });
+/* harmony import */ var _base_image_processors_utils_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ../../base/image_processors_utils.js */ "./src/base/image_processors_utils.js");
+/* harmony import */ var _utils_tensor_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ../../utils/tensor.js */ "./src/utils/tensor.js");
+
+
+
+
+
+/**
+ * @typedef {object} GroundingDinoFeatureExtractorResultProps
+ * @property {import('../../utils/tensor.js').Tensor} pixel_mask
+ * @typedef {import('../../base/image_processors_utils.js').ImageProcessorResult & GroundingDinoFeatureExtractorResultProps} GroundingDinoFeatureExtractorResult
+ */
+
+class GroundingDinoImageProcessor extends _base_image_processors_utils_js__WEBPACK_IMPORTED_MODULE_0__.ImageProcessor {
+    /**
+     * Calls the feature extraction process on an array of images, preprocesses
+     * each image, and concatenates the resulting features into a single Tensor.
+     * @param {import('../../utils/image.js').RawImage[]} images The image(s) to extract features from.
+     * @returns {Promise<GroundingDinoFeatureExtractorResult>} An object containing the concatenated pixel values of the preprocessed images.
+     */
+    async _call(images) {
+        const result = await super._call(images);
+
+        const dims = result.pixel_values.dims;
+        const pixel_mask = (0,_utils_tensor_js__WEBPACK_IMPORTED_MODULE_1__.ones)([dims[0], dims[2], dims[3]]);
+
+        return { ...result, pixel_mask };
+    }
+}
+
+
+/***/ }),
+
+/***/ "./src/models/grounding_dino/processing_grounding_dino.js":
+/*!****************************************************************!*\
+  !*** ./src/models/grounding_dino/processing_grounding_dino.js ***!
+  \****************************************************************/
+/***/ ((__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) => {
+
+"use strict";
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   GroundingDinoProcessor: () => (/* binding */ GroundingDinoProcessor)
+/* harmony export */ });
+/* harmony import */ var _base_processing_utils_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ../../base/processing_utils.js */ "./src/base/processing_utils.js");
+/* harmony import */ var _auto_image_processing_auto_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ../auto/image_processing_auto.js */ "./src/models/auto/image_processing_auto.js");
+/* harmony import */ var _tokenizers_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ../../tokenizers.js */ "./src/tokenizers.js");
+/* harmony import */ var _base_image_processors_utils_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ../../base/image_processors_utils.js */ "./src/base/image_processors_utils.js");
+
+
+
+
+
+/**
+ * Get token ids of phrases from posmaps and input_ids.
+ * @param {import('../../utils/tensor.js').Tensor} posmaps A boolean tensor of unbatched text-thresholded logits related to the detected bounding boxes of shape `(hidden_size, )`.
+ * @param {import('../../utils/tensor.js').Tensor} input_ids A tensor of token ids of shape `(sequence_length, )`.
+ */
+function get_phrases_from_posmap(posmaps, input_ids) {
+
+    const left_idx = 0;
+    const right_idx = posmaps.dims.at(-1) - 1;
+
+    const posmaps_list = posmaps.tolist();
+    posmaps_list.fill(false, 0, left_idx + 1);
+    posmaps_list.fill(false, right_idx);
+
+    const input_ids_list = input_ids.tolist();
+    return posmaps_list
+        .map((val, idx) => val ? idx : null)
+        .filter(idx => idx !== null)
+        .map(i => input_ids_list[i]);
+}
+
+class GroundingDinoProcessor extends _base_processing_utils_js__WEBPACK_IMPORTED_MODULE_0__.Processor {
+    static tokenizer_class = _tokenizers_js__WEBPACK_IMPORTED_MODULE_2__.AutoTokenizer
+    static image_processor_class = _auto_image_processing_auto_js__WEBPACK_IMPORTED_MODULE_1__.AutoImageProcessor
+
+    /**
+     * @typedef {import('../../utils/image.js').RawImage} RawImage
+     */
+    /**
+     * 
+     * @param {RawImage|RawImage[]|RawImage[][]} images  
+     * @param {string|string[]} text 
+     * @returns {Promise<any>}
+     */
+    async _call(images, text, options = {}) {
+
+        const image_inputs = images ? await this.image_processor(images, options) : {};
+        const text_inputs = text ? this.tokenizer(text, options) : {};
+
+        return {
+            ...text_inputs,
+            ...image_inputs,
+        }
+    }
+    post_process_grounded_object_detection(outputs, input_ids, {
+        box_threshold = 0.25,
+        text_threshold = 0.25,
+        target_sizes = null
+    } = {}) {
+        const { logits, pred_boxes } = outputs;
+        const batch_size = logits.dims[0];
+
+        if (target_sizes !== null && target_sizes.length !== batch_size) {
+            throw Error("Make sure that you pass in as many target sizes as the batch dimension of the logits")
+        }
+        const num_queries = logits.dims.at(1);
+
+        const probs = logits.sigmoid(); // (batch_size, num_queries, 256)
+        const scores = probs.max(-1).tolist(); // (batch_size, num_queries)
+
+        // Convert to [x0, y0, x1, y1] format
+        const boxes = pred_boxes.tolist() // (batch_size, num_queries, 4)
+            .map(batch => batch.map(box => (0,_base_image_processors_utils_js__WEBPACK_IMPORTED_MODULE_3__.center_to_corners_format)(box)));
+
+        const results = [];
+        for (let i = 0; i < batch_size; ++i) {
+            const target_size = target_sizes !== null ? target_sizes[i] : null;
+
+            // Convert from relative [0, 1] to absolute [0, height] coordinates
+            if (target_size !== null) {
+                boxes[i] = boxes[i].map(box => box.map((x, j) => x * target_size[(j + 1) % 2]));
+            }
+
+            const batch_scores = scores[i];
+            const final_scores = [];
+            const final_phrases = [];
+            const final_boxes = [];
+            for (let j = 0; j < num_queries; ++j) {
+                const score = batch_scores[j];
+                if (score <= box_threshold) {
+                    continue;
+                }
+                const box = boxes[i][j];
+                const prob = probs[i][j];
+
+                final_scores.push(score);
+                final_boxes.push(box);
+
+                const phrases = get_phrases_from_posmap(prob.gt(text_threshold), input_ids[i]);
+                final_phrases.push(phrases);
+            }
+            results.push({ scores: final_scores, boxes: final_boxes, labels: this.batch_decode(final_phrases) });
+        }
+        return results;
+    }
+}
+
+
+/***/ }),
+
 /***/ "./src/models/idefics3/image_processing_idefics3.js":
 /*!**********************************************************!*\
   !*** ./src/models/idefics3/image_processing_idefics3.js ***!
@@ -17688,42 +17972,43 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   DonutImageProcessor: () => (/* reexport safe */ _donut_image_processing_donut_js__WEBPACK_IMPORTED_MODULE_7__.DonutImageProcessor),
 /* harmony export */   EfficientNetImageProcessor: () => (/* reexport safe */ _efficientnet_image_processing_efficientnet_js__WEBPACK_IMPORTED_MODULE_9__.EfficientNetImageProcessor),
 /* harmony export */   GLPNFeatureExtractor: () => (/* reexport safe */ _glpn_image_processing_glpn_js__WEBPACK_IMPORTED_MODULE_10__.GLPNFeatureExtractor),
-/* harmony export */   Idefics3ImageProcessor: () => (/* reexport safe */ _idefics3_image_processing_idefics3_js__WEBPACK_IMPORTED_MODULE_11__.Idefics3ImageProcessor),
-/* harmony export */   JinaCLIPImageProcessor: () => (/* reexport safe */ _jina_clip_image_processing_jina_clip_js__WEBPACK_IMPORTED_MODULE_13__.JinaCLIPImageProcessor),
-/* harmony export */   LlavaOnevisionImageProcessor: () => (/* reexport safe */ _llava_onevision_image_processing_llava_onevision_js__WEBPACK_IMPORTED_MODULE_14__.LlavaOnevisionImageProcessor),
-/* harmony export */   Mask2FormerImageProcessor: () => (/* reexport safe */ _mask2former_image_processing_mask2former_js__WEBPACK_IMPORTED_MODULE_15__.Mask2FormerImageProcessor),
-/* harmony export */   MaskFormerFeatureExtractor: () => (/* reexport safe */ _maskformer_image_processing_maskformer_js__WEBPACK_IMPORTED_MODULE_16__.MaskFormerFeatureExtractor),
-/* harmony export */   MaskFormerImageProcessor: () => (/* reexport safe */ _maskformer_image_processing_maskformer_js__WEBPACK_IMPORTED_MODULE_16__.MaskFormerImageProcessor),
-/* harmony export */   MobileNetV1FeatureExtractor: () => (/* reexport safe */ _mobilenet_v1_image_processing_mobilenet_v1_js__WEBPACK_IMPORTED_MODULE_17__.MobileNetV1FeatureExtractor),
-/* harmony export */   MobileNetV1ImageProcessor: () => (/* reexport safe */ _mobilenet_v1_image_processing_mobilenet_v1_js__WEBPACK_IMPORTED_MODULE_17__.MobileNetV1ImageProcessor),
-/* harmony export */   MobileNetV2FeatureExtractor: () => (/* reexport safe */ _mobilenet_v2_image_processing_mobilenet_v2_js__WEBPACK_IMPORTED_MODULE_18__.MobileNetV2FeatureExtractor),
-/* harmony export */   MobileNetV2ImageProcessor: () => (/* reexport safe */ _mobilenet_v2_image_processing_mobilenet_v2_js__WEBPACK_IMPORTED_MODULE_18__.MobileNetV2ImageProcessor),
-/* harmony export */   MobileNetV3FeatureExtractor: () => (/* reexport safe */ _mobilenet_v3_image_processing_mobilenet_v3_js__WEBPACK_IMPORTED_MODULE_19__.MobileNetV3FeatureExtractor),
-/* harmony export */   MobileNetV3ImageProcessor: () => (/* reexport safe */ _mobilenet_v3_image_processing_mobilenet_v3_js__WEBPACK_IMPORTED_MODULE_19__.MobileNetV3ImageProcessor),
-/* harmony export */   MobileNetV4FeatureExtractor: () => (/* reexport safe */ _mobilenet_v4_image_processing_mobilenet_v4_js__WEBPACK_IMPORTED_MODULE_20__.MobileNetV4FeatureExtractor),
-/* harmony export */   MobileNetV4ImageProcessor: () => (/* reexport safe */ _mobilenet_v4_image_processing_mobilenet_v4_js__WEBPACK_IMPORTED_MODULE_20__.MobileNetV4ImageProcessor),
-/* harmony export */   MobileViTFeatureExtractor: () => (/* reexport safe */ _mobilevit_image_processing_mobilevit_js__WEBPACK_IMPORTED_MODULE_21__.MobileViTFeatureExtractor),
-/* harmony export */   MobileViTImageProcessor: () => (/* reexport safe */ _mobilevit_image_processing_mobilevit_js__WEBPACK_IMPORTED_MODULE_21__.MobileViTImageProcessor),
-/* harmony export */   NougatImageProcessor: () => (/* reexport safe */ _nougat_image_processing_nougat_js__WEBPACK_IMPORTED_MODULE_22__.NougatImageProcessor),
-/* harmony export */   OwlViTFeatureExtractor: () => (/* reexport safe */ _owlvit_image_processing_owlvit_js__WEBPACK_IMPORTED_MODULE_24__.OwlViTFeatureExtractor),
-/* harmony export */   OwlViTImageProcessor: () => (/* reexport safe */ _owlvit_image_processing_owlvit_js__WEBPACK_IMPORTED_MODULE_24__.OwlViTImageProcessor),
-/* harmony export */   Owlv2ImageProcessor: () => (/* reexport safe */ _owlv2_image_processing_owlv2_js__WEBPACK_IMPORTED_MODULE_23__.Owlv2ImageProcessor),
-/* harmony export */   Phi3VImageProcessor: () => (/* reexport safe */ _phi3_v_image_processing_phi3_v_js__WEBPACK_IMPORTED_MODULE_25__.Phi3VImageProcessor),
-/* harmony export */   PvtImageProcessor: () => (/* reexport safe */ _pvt_image_processing_pvt_js__WEBPACK_IMPORTED_MODULE_26__.PvtImageProcessor),
-/* harmony export */   Qwen2VLImageProcessor: () => (/* reexport safe */ _qwen2_vl_image_processing_qwen2_vl_js__WEBPACK_IMPORTED_MODULE_27__.Qwen2VLImageProcessor),
-/* harmony export */   RTDetrImageProcessor: () => (/* reexport safe */ _rt_detr_image_processing_rt_detr_js__WEBPACK_IMPORTED_MODULE_28__.RTDetrImageProcessor),
-/* harmony export */   SamImageProcessor: () => (/* reexport safe */ _sam_image_processing_sam_js__WEBPACK_IMPORTED_MODULE_29__.SamImageProcessor),
-/* harmony export */   SegformerFeatureExtractor: () => (/* reexport safe */ _segformer_image_processing_segformer_js__WEBPACK_IMPORTED_MODULE_30__.SegformerFeatureExtractor),
-/* harmony export */   SegformerImageProcessor: () => (/* reexport safe */ _segformer_image_processing_segformer_js__WEBPACK_IMPORTED_MODULE_30__.SegformerImageProcessor),
-/* harmony export */   SiglipImageProcessor: () => (/* reexport safe */ _siglip_image_processing_siglip_js__WEBPACK_IMPORTED_MODULE_31__.SiglipImageProcessor),
-/* harmony export */   Swin2SRImageProcessor: () => (/* reexport safe */ _swin2sr_image_processing_swin2sr_js__WEBPACK_IMPORTED_MODULE_32__.Swin2SRImageProcessor),
-/* harmony export */   VLMImageProcessor: () => (/* reexport safe */ _janus_image_processing_janus_js__WEBPACK_IMPORTED_MODULE_12__.VLMImageProcessor),
-/* harmony export */   ViTFeatureExtractor: () => (/* reexport safe */ _vit_image_processing_vit_js__WEBPACK_IMPORTED_MODULE_33__.ViTFeatureExtractor),
-/* harmony export */   ViTImageProcessor: () => (/* reexport safe */ _vit_image_processing_vit_js__WEBPACK_IMPORTED_MODULE_33__.ViTImageProcessor),
-/* harmony export */   VitMatteImageProcessor: () => (/* reexport safe */ _vitmatte_image_processing_vitmatte_js__WEBPACK_IMPORTED_MODULE_34__.VitMatteImageProcessor),
-/* harmony export */   VitPoseImageProcessor: () => (/* reexport safe */ _vitpose_image_processing_vitpose_js__WEBPACK_IMPORTED_MODULE_35__.VitPoseImageProcessor),
-/* harmony export */   YolosFeatureExtractor: () => (/* reexport safe */ _yolos_image_processing_yolos_js__WEBPACK_IMPORTED_MODULE_36__.YolosFeatureExtractor),
-/* harmony export */   YolosImageProcessor: () => (/* reexport safe */ _yolos_image_processing_yolos_js__WEBPACK_IMPORTED_MODULE_36__.YolosImageProcessor)
+/* harmony export */   GroundingDinoImageProcessor: () => (/* reexport safe */ _grounding_dino_image_processing_grounding_dino_js__WEBPACK_IMPORTED_MODULE_11__.GroundingDinoImageProcessor),
+/* harmony export */   Idefics3ImageProcessor: () => (/* reexport safe */ _idefics3_image_processing_idefics3_js__WEBPACK_IMPORTED_MODULE_12__.Idefics3ImageProcessor),
+/* harmony export */   JinaCLIPImageProcessor: () => (/* reexport safe */ _jina_clip_image_processing_jina_clip_js__WEBPACK_IMPORTED_MODULE_14__.JinaCLIPImageProcessor),
+/* harmony export */   LlavaOnevisionImageProcessor: () => (/* reexport safe */ _llava_onevision_image_processing_llava_onevision_js__WEBPACK_IMPORTED_MODULE_15__.LlavaOnevisionImageProcessor),
+/* harmony export */   Mask2FormerImageProcessor: () => (/* reexport safe */ _mask2former_image_processing_mask2former_js__WEBPACK_IMPORTED_MODULE_16__.Mask2FormerImageProcessor),
+/* harmony export */   MaskFormerFeatureExtractor: () => (/* reexport safe */ _maskformer_image_processing_maskformer_js__WEBPACK_IMPORTED_MODULE_17__.MaskFormerFeatureExtractor),
+/* harmony export */   MaskFormerImageProcessor: () => (/* reexport safe */ _maskformer_image_processing_maskformer_js__WEBPACK_IMPORTED_MODULE_17__.MaskFormerImageProcessor),
+/* harmony export */   MobileNetV1FeatureExtractor: () => (/* reexport safe */ _mobilenet_v1_image_processing_mobilenet_v1_js__WEBPACK_IMPORTED_MODULE_18__.MobileNetV1FeatureExtractor),
+/* harmony export */   MobileNetV1ImageProcessor: () => (/* reexport safe */ _mobilenet_v1_image_processing_mobilenet_v1_js__WEBPACK_IMPORTED_MODULE_18__.MobileNetV1ImageProcessor),
+/* harmony export */   MobileNetV2FeatureExtractor: () => (/* reexport safe */ _mobilenet_v2_image_processing_mobilenet_v2_js__WEBPACK_IMPORTED_MODULE_19__.MobileNetV2FeatureExtractor),
+/* harmony export */   MobileNetV2ImageProcessor: () => (/* reexport safe */ _mobilenet_v2_image_processing_mobilenet_v2_js__WEBPACK_IMPORTED_MODULE_19__.MobileNetV2ImageProcessor),
+/* harmony export */   MobileNetV3FeatureExtractor: () => (/* reexport safe */ _mobilenet_v3_image_processing_mobilenet_v3_js__WEBPACK_IMPORTED_MODULE_20__.MobileNetV3FeatureExtractor),
+/* harmony export */   MobileNetV3ImageProcessor: () => (/* reexport safe */ _mobilenet_v3_image_processing_mobilenet_v3_js__WEBPACK_IMPORTED_MODULE_20__.MobileNetV3ImageProcessor),
+/* harmony export */   MobileNetV4FeatureExtractor: () => (/* reexport safe */ _mobilenet_v4_image_processing_mobilenet_v4_js__WEBPACK_IMPORTED_MODULE_21__.MobileNetV4FeatureExtractor),
+/* harmony export */   MobileNetV4ImageProcessor: () => (/* reexport safe */ _mobilenet_v4_image_processing_mobilenet_v4_js__WEBPACK_IMPORTED_MODULE_21__.MobileNetV4ImageProcessor),
+/* harmony export */   MobileViTFeatureExtractor: () => (/* reexport safe */ _mobilevit_image_processing_mobilevit_js__WEBPACK_IMPORTED_MODULE_22__.MobileViTFeatureExtractor),
+/* harmony export */   MobileViTImageProcessor: () => (/* reexport safe */ _mobilevit_image_processing_mobilevit_js__WEBPACK_IMPORTED_MODULE_22__.MobileViTImageProcessor),
+/* harmony export */   NougatImageProcessor: () => (/* reexport safe */ _nougat_image_processing_nougat_js__WEBPACK_IMPORTED_MODULE_23__.NougatImageProcessor),
+/* harmony export */   OwlViTFeatureExtractor: () => (/* reexport safe */ _owlvit_image_processing_owlvit_js__WEBPACK_IMPORTED_MODULE_25__.OwlViTFeatureExtractor),
+/* harmony export */   OwlViTImageProcessor: () => (/* reexport safe */ _owlvit_image_processing_owlvit_js__WEBPACK_IMPORTED_MODULE_25__.OwlViTImageProcessor),
+/* harmony export */   Owlv2ImageProcessor: () => (/* reexport safe */ _owlv2_image_processing_owlv2_js__WEBPACK_IMPORTED_MODULE_24__.Owlv2ImageProcessor),
+/* harmony export */   Phi3VImageProcessor: () => (/* reexport safe */ _phi3_v_image_processing_phi3_v_js__WEBPACK_IMPORTED_MODULE_26__.Phi3VImageProcessor),
+/* harmony export */   PvtImageProcessor: () => (/* reexport safe */ _pvt_image_processing_pvt_js__WEBPACK_IMPORTED_MODULE_27__.PvtImageProcessor),
+/* harmony export */   Qwen2VLImageProcessor: () => (/* reexport safe */ _qwen2_vl_image_processing_qwen2_vl_js__WEBPACK_IMPORTED_MODULE_28__.Qwen2VLImageProcessor),
+/* harmony export */   RTDetrImageProcessor: () => (/* reexport safe */ _rt_detr_image_processing_rt_detr_js__WEBPACK_IMPORTED_MODULE_29__.RTDetrImageProcessor),
+/* harmony export */   SamImageProcessor: () => (/* reexport safe */ _sam_image_processing_sam_js__WEBPACK_IMPORTED_MODULE_30__.SamImageProcessor),
+/* harmony export */   SegformerFeatureExtractor: () => (/* reexport safe */ _segformer_image_processing_segformer_js__WEBPACK_IMPORTED_MODULE_31__.SegformerFeatureExtractor),
+/* harmony export */   SegformerImageProcessor: () => (/* reexport safe */ _segformer_image_processing_segformer_js__WEBPACK_IMPORTED_MODULE_31__.SegformerImageProcessor),
+/* harmony export */   SiglipImageProcessor: () => (/* reexport safe */ _siglip_image_processing_siglip_js__WEBPACK_IMPORTED_MODULE_32__.SiglipImageProcessor),
+/* harmony export */   Swin2SRImageProcessor: () => (/* reexport safe */ _swin2sr_image_processing_swin2sr_js__WEBPACK_IMPORTED_MODULE_33__.Swin2SRImageProcessor),
+/* harmony export */   VLMImageProcessor: () => (/* reexport safe */ _janus_image_processing_janus_js__WEBPACK_IMPORTED_MODULE_13__.VLMImageProcessor),
+/* harmony export */   ViTFeatureExtractor: () => (/* reexport safe */ _vit_image_processing_vit_js__WEBPACK_IMPORTED_MODULE_34__.ViTFeatureExtractor),
+/* harmony export */   ViTImageProcessor: () => (/* reexport safe */ _vit_image_processing_vit_js__WEBPACK_IMPORTED_MODULE_34__.ViTImageProcessor),
+/* harmony export */   VitMatteImageProcessor: () => (/* reexport safe */ _vitmatte_image_processing_vitmatte_js__WEBPACK_IMPORTED_MODULE_35__.VitMatteImageProcessor),
+/* harmony export */   VitPoseImageProcessor: () => (/* reexport safe */ _vitpose_image_processing_vitpose_js__WEBPACK_IMPORTED_MODULE_36__.VitPoseImageProcessor),
+/* harmony export */   YolosFeatureExtractor: () => (/* reexport safe */ _yolos_image_processing_yolos_js__WEBPACK_IMPORTED_MODULE_37__.YolosFeatureExtractor),
+/* harmony export */   YolosImageProcessor: () => (/* reexport safe */ _yolos_image_processing_yolos_js__WEBPACK_IMPORTED_MODULE_37__.YolosImageProcessor)
 /* harmony export */ });
 /* harmony import */ var _beit_image_processing_beit_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./beit/image_processing_beit.js */ "./src/models/beit/image_processing_beit.js");
 /* harmony import */ var _bit_image_processing_bit_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./bit/image_processing_bit.js */ "./src/models/bit/image_processing_bit.js");
@@ -17736,32 +18021,34 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _dpt_image_processing_dpt_js__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(/*! ./dpt/image_processing_dpt.js */ "./src/models/dpt/image_processing_dpt.js");
 /* harmony import */ var _efficientnet_image_processing_efficientnet_js__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(/*! ./efficientnet/image_processing_efficientnet.js */ "./src/models/efficientnet/image_processing_efficientnet.js");
 /* harmony import */ var _glpn_image_processing_glpn_js__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(/*! ./glpn/image_processing_glpn.js */ "./src/models/glpn/image_processing_glpn.js");
-/* harmony import */ var _idefics3_image_processing_idefics3_js__WEBPACK_IMPORTED_MODULE_11__ = __webpack_require__(/*! ./idefics3/image_processing_idefics3.js */ "./src/models/idefics3/image_processing_idefics3.js");
-/* harmony import */ var _janus_image_processing_janus_js__WEBPACK_IMPORTED_MODULE_12__ = __webpack_require__(/*! ./janus/image_processing_janus.js */ "./src/models/janus/image_processing_janus.js");
-/* harmony import */ var _jina_clip_image_processing_jina_clip_js__WEBPACK_IMPORTED_MODULE_13__ = __webpack_require__(/*! ./jina_clip/image_processing_jina_clip.js */ "./src/models/jina_clip/image_processing_jina_clip.js");
-/* harmony import */ var _llava_onevision_image_processing_llava_onevision_js__WEBPACK_IMPORTED_MODULE_14__ = __webpack_require__(/*! ./llava_onevision/image_processing_llava_onevision.js */ "./src/models/llava_onevision/image_processing_llava_onevision.js");
-/* harmony import */ var _mask2former_image_processing_mask2former_js__WEBPACK_IMPORTED_MODULE_15__ = __webpack_require__(/*! ./mask2former/image_processing_mask2former.js */ "./src/models/mask2former/image_processing_mask2former.js");
-/* harmony import */ var _maskformer_image_processing_maskformer_js__WEBPACK_IMPORTED_MODULE_16__ = __webpack_require__(/*! ./maskformer/image_processing_maskformer.js */ "./src/models/maskformer/image_processing_maskformer.js");
-/* harmony import */ var _mobilenet_v1_image_processing_mobilenet_v1_js__WEBPACK_IMPORTED_MODULE_17__ = __webpack_require__(/*! ./mobilenet_v1/image_processing_mobilenet_v1.js */ "./src/models/mobilenet_v1/image_processing_mobilenet_v1.js");
-/* harmony import */ var _mobilenet_v2_image_processing_mobilenet_v2_js__WEBPACK_IMPORTED_MODULE_18__ = __webpack_require__(/*! ./mobilenet_v2/image_processing_mobilenet_v2.js */ "./src/models/mobilenet_v2/image_processing_mobilenet_v2.js");
-/* harmony import */ var _mobilenet_v3_image_processing_mobilenet_v3_js__WEBPACK_IMPORTED_MODULE_19__ = __webpack_require__(/*! ./mobilenet_v3/image_processing_mobilenet_v3.js */ "./src/models/mobilenet_v3/image_processing_mobilenet_v3.js");
-/* harmony import */ var _mobilenet_v4_image_processing_mobilenet_v4_js__WEBPACK_IMPORTED_MODULE_20__ = __webpack_require__(/*! ./mobilenet_v4/image_processing_mobilenet_v4.js */ "./src/models/mobilenet_v4/image_processing_mobilenet_v4.js");
-/* harmony import */ var _mobilevit_image_processing_mobilevit_js__WEBPACK_IMPORTED_MODULE_21__ = __webpack_require__(/*! ./mobilevit/image_processing_mobilevit.js */ "./src/models/mobilevit/image_processing_mobilevit.js");
-/* harmony import */ var _nougat_image_processing_nougat_js__WEBPACK_IMPORTED_MODULE_22__ = __webpack_require__(/*! ./nougat/image_processing_nougat.js */ "./src/models/nougat/image_processing_nougat.js");
-/* harmony import */ var _owlv2_image_processing_owlv2_js__WEBPACK_IMPORTED_MODULE_23__ = __webpack_require__(/*! ./owlv2/image_processing_owlv2.js */ "./src/models/owlv2/image_processing_owlv2.js");
-/* harmony import */ var _owlvit_image_processing_owlvit_js__WEBPACK_IMPORTED_MODULE_24__ = __webpack_require__(/*! ./owlvit/image_processing_owlvit.js */ "./src/models/owlvit/image_processing_owlvit.js");
-/* harmony import */ var _phi3_v_image_processing_phi3_v_js__WEBPACK_IMPORTED_MODULE_25__ = __webpack_require__(/*! ./phi3_v/image_processing_phi3_v.js */ "./src/models/phi3_v/image_processing_phi3_v.js");
-/* harmony import */ var _pvt_image_processing_pvt_js__WEBPACK_IMPORTED_MODULE_26__ = __webpack_require__(/*! ./pvt/image_processing_pvt.js */ "./src/models/pvt/image_processing_pvt.js");
-/* harmony import */ var _qwen2_vl_image_processing_qwen2_vl_js__WEBPACK_IMPORTED_MODULE_27__ = __webpack_require__(/*! ./qwen2_vl/image_processing_qwen2_vl.js */ "./src/models/qwen2_vl/image_processing_qwen2_vl.js");
-/* harmony import */ var _rt_detr_image_processing_rt_detr_js__WEBPACK_IMPORTED_MODULE_28__ = __webpack_require__(/*! ./rt_detr/image_processing_rt_detr.js */ "./src/models/rt_detr/image_processing_rt_detr.js");
-/* harmony import */ var _sam_image_processing_sam_js__WEBPACK_IMPORTED_MODULE_29__ = __webpack_require__(/*! ./sam/image_processing_sam.js */ "./src/models/sam/image_processing_sam.js");
-/* harmony import */ var _segformer_image_processing_segformer_js__WEBPACK_IMPORTED_MODULE_30__ = __webpack_require__(/*! ./segformer/image_processing_segformer.js */ "./src/models/segformer/image_processing_segformer.js");
-/* harmony import */ var _siglip_image_processing_siglip_js__WEBPACK_IMPORTED_MODULE_31__ = __webpack_require__(/*! ./siglip/image_processing_siglip.js */ "./src/models/siglip/image_processing_siglip.js");
-/* harmony import */ var _swin2sr_image_processing_swin2sr_js__WEBPACK_IMPORTED_MODULE_32__ = __webpack_require__(/*! ./swin2sr/image_processing_swin2sr.js */ "./src/models/swin2sr/image_processing_swin2sr.js");
-/* harmony import */ var _vit_image_processing_vit_js__WEBPACK_IMPORTED_MODULE_33__ = __webpack_require__(/*! ./vit/image_processing_vit.js */ "./src/models/vit/image_processing_vit.js");
-/* harmony import */ var _vitmatte_image_processing_vitmatte_js__WEBPACK_IMPORTED_MODULE_34__ = __webpack_require__(/*! ./vitmatte/image_processing_vitmatte.js */ "./src/models/vitmatte/image_processing_vitmatte.js");
-/* harmony import */ var _vitpose_image_processing_vitpose_js__WEBPACK_IMPORTED_MODULE_35__ = __webpack_require__(/*! ./vitpose/image_processing_vitpose.js */ "./src/models/vitpose/image_processing_vitpose.js");
-/* harmony import */ var _yolos_image_processing_yolos_js__WEBPACK_IMPORTED_MODULE_36__ = __webpack_require__(/*! ./yolos/image_processing_yolos.js */ "./src/models/yolos/image_processing_yolos.js");
+/* harmony import */ var _grounding_dino_image_processing_grounding_dino_js__WEBPACK_IMPORTED_MODULE_11__ = __webpack_require__(/*! ./grounding_dino/image_processing_grounding_dino.js */ "./src/models/grounding_dino/image_processing_grounding_dino.js");
+/* harmony import */ var _idefics3_image_processing_idefics3_js__WEBPACK_IMPORTED_MODULE_12__ = __webpack_require__(/*! ./idefics3/image_processing_idefics3.js */ "./src/models/idefics3/image_processing_idefics3.js");
+/* harmony import */ var _janus_image_processing_janus_js__WEBPACK_IMPORTED_MODULE_13__ = __webpack_require__(/*! ./janus/image_processing_janus.js */ "./src/models/janus/image_processing_janus.js");
+/* harmony import */ var _jina_clip_image_processing_jina_clip_js__WEBPACK_IMPORTED_MODULE_14__ = __webpack_require__(/*! ./jina_clip/image_processing_jina_clip.js */ "./src/models/jina_clip/image_processing_jina_clip.js");
+/* harmony import */ var _llava_onevision_image_processing_llava_onevision_js__WEBPACK_IMPORTED_MODULE_15__ = __webpack_require__(/*! ./llava_onevision/image_processing_llava_onevision.js */ "./src/models/llava_onevision/image_processing_llava_onevision.js");
+/* harmony import */ var _mask2former_image_processing_mask2former_js__WEBPACK_IMPORTED_MODULE_16__ = __webpack_require__(/*! ./mask2former/image_processing_mask2former.js */ "./src/models/mask2former/image_processing_mask2former.js");
+/* harmony import */ var _maskformer_image_processing_maskformer_js__WEBPACK_IMPORTED_MODULE_17__ = __webpack_require__(/*! ./maskformer/image_processing_maskformer.js */ "./src/models/maskformer/image_processing_maskformer.js");
+/* harmony import */ var _mobilenet_v1_image_processing_mobilenet_v1_js__WEBPACK_IMPORTED_MODULE_18__ = __webpack_require__(/*! ./mobilenet_v1/image_processing_mobilenet_v1.js */ "./src/models/mobilenet_v1/image_processing_mobilenet_v1.js");
+/* harmony import */ var _mobilenet_v2_image_processing_mobilenet_v2_js__WEBPACK_IMPORTED_MODULE_19__ = __webpack_require__(/*! ./mobilenet_v2/image_processing_mobilenet_v2.js */ "./src/models/mobilenet_v2/image_processing_mobilenet_v2.js");
+/* harmony import */ var _mobilenet_v3_image_processing_mobilenet_v3_js__WEBPACK_IMPORTED_MODULE_20__ = __webpack_require__(/*! ./mobilenet_v3/image_processing_mobilenet_v3.js */ "./src/models/mobilenet_v3/image_processing_mobilenet_v3.js");
+/* harmony import */ var _mobilenet_v4_image_processing_mobilenet_v4_js__WEBPACK_IMPORTED_MODULE_21__ = __webpack_require__(/*! ./mobilenet_v4/image_processing_mobilenet_v4.js */ "./src/models/mobilenet_v4/image_processing_mobilenet_v4.js");
+/* harmony import */ var _mobilevit_image_processing_mobilevit_js__WEBPACK_IMPORTED_MODULE_22__ = __webpack_require__(/*! ./mobilevit/image_processing_mobilevit.js */ "./src/models/mobilevit/image_processing_mobilevit.js");
+/* harmony import */ var _nougat_image_processing_nougat_js__WEBPACK_IMPORTED_MODULE_23__ = __webpack_require__(/*! ./nougat/image_processing_nougat.js */ "./src/models/nougat/image_processing_nougat.js");
+/* harmony import */ var _owlv2_image_processing_owlv2_js__WEBPACK_IMPORTED_MODULE_24__ = __webpack_require__(/*! ./owlv2/image_processing_owlv2.js */ "./src/models/owlv2/image_processing_owlv2.js");
+/* harmony import */ var _owlvit_image_processing_owlvit_js__WEBPACK_IMPORTED_MODULE_25__ = __webpack_require__(/*! ./owlvit/image_processing_owlvit.js */ "./src/models/owlvit/image_processing_owlvit.js");
+/* harmony import */ var _phi3_v_image_processing_phi3_v_js__WEBPACK_IMPORTED_MODULE_26__ = __webpack_require__(/*! ./phi3_v/image_processing_phi3_v.js */ "./src/models/phi3_v/image_processing_phi3_v.js");
+/* harmony import */ var _pvt_image_processing_pvt_js__WEBPACK_IMPORTED_MODULE_27__ = __webpack_require__(/*! ./pvt/image_processing_pvt.js */ "./src/models/pvt/image_processing_pvt.js");
+/* harmony import */ var _qwen2_vl_image_processing_qwen2_vl_js__WEBPACK_IMPORTED_MODULE_28__ = __webpack_require__(/*! ./qwen2_vl/image_processing_qwen2_vl.js */ "./src/models/qwen2_vl/image_processing_qwen2_vl.js");
+/* harmony import */ var _rt_detr_image_processing_rt_detr_js__WEBPACK_IMPORTED_MODULE_29__ = __webpack_require__(/*! ./rt_detr/image_processing_rt_detr.js */ "./src/models/rt_detr/image_processing_rt_detr.js");
+/* harmony import */ var _sam_image_processing_sam_js__WEBPACK_IMPORTED_MODULE_30__ = __webpack_require__(/*! ./sam/image_processing_sam.js */ "./src/models/sam/image_processing_sam.js");
+/* harmony import */ var _segformer_image_processing_segformer_js__WEBPACK_IMPORTED_MODULE_31__ = __webpack_require__(/*! ./segformer/image_processing_segformer.js */ "./src/models/segformer/image_processing_segformer.js");
+/* harmony import */ var _siglip_image_processing_siglip_js__WEBPACK_IMPORTED_MODULE_32__ = __webpack_require__(/*! ./siglip/image_processing_siglip.js */ "./src/models/siglip/image_processing_siglip.js");
+/* harmony import */ var _swin2sr_image_processing_swin2sr_js__WEBPACK_IMPORTED_MODULE_33__ = __webpack_require__(/*! ./swin2sr/image_processing_swin2sr.js */ "./src/models/swin2sr/image_processing_swin2sr.js");
+/* harmony import */ var _vit_image_processing_vit_js__WEBPACK_IMPORTED_MODULE_34__ = __webpack_require__(/*! ./vit/image_processing_vit.js */ "./src/models/vit/image_processing_vit.js");
+/* harmony import */ var _vitmatte_image_processing_vitmatte_js__WEBPACK_IMPORTED_MODULE_35__ = __webpack_require__(/*! ./vitmatte/image_processing_vitmatte.js */ "./src/models/vitmatte/image_processing_vitmatte.js");
+/* harmony import */ var _vitpose_image_processing_vitpose_js__WEBPACK_IMPORTED_MODULE_36__ = __webpack_require__(/*! ./vitpose/image_processing_vitpose.js */ "./src/models/vitpose/image_processing_vitpose.js");
+/* harmony import */ var _yolos_image_processing_yolos_js__WEBPACK_IMPORTED_MODULE_37__ = __webpack_require__(/*! ./yolos/image_processing_yolos.js */ "./src/models/yolos/image_processing_yolos.js");
+
 
 
 
@@ -18977,36 +19264,42 @@ class Phi3VProcessor extends _base_processing_utils_js__WEBPACK_IMPORTED_MODULE_
 __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   Florence2Processor: () => (/* reexport safe */ _florence2_processing_florence2_js__WEBPACK_IMPORTED_MODULE_0__.Florence2Processor),
-/* harmony export */   Idefics3Processor: () => (/* reexport safe */ _idefics3_processing_idefics3_js__WEBPACK_IMPORTED_MODULE_3__.Idefics3Processor),
-/* harmony export */   JinaCLIPProcessor: () => (/* reexport safe */ _jina_clip_processing_jina_clip_js__WEBPACK_IMPORTED_MODULE_5__.JinaCLIPProcessor),
-/* harmony export */   MgpstrProcessor: () => (/* reexport safe */ _mgp_str_processing_mgp_str_js__WEBPACK_IMPORTED_MODULE_1__.MgpstrProcessor),
-/* harmony export */   MoonshineProcessor: () => (/* reexport safe */ _moonshine_processing_moonshine_js__WEBPACK_IMPORTED_MODULE_2__.MoonshineProcessor),
-/* harmony export */   OwlViTProcessor: () => (/* reexport safe */ _owlvit_processing_owlvit_js__WEBPACK_IMPORTED_MODULE_6__.OwlViTProcessor),
-/* harmony export */   PaliGemmaProcessor: () => (/* reexport safe */ _paligemma_processing_paligemma_js__WEBPACK_IMPORTED_MODULE_8__.PaliGemmaProcessor),
-/* harmony export */   Phi3VProcessor: () => (/* reexport safe */ _phi3_v_processing_phi3_v_js__WEBPACK_IMPORTED_MODULE_7__.Phi3VProcessor),
-/* harmony export */   PyAnnoteProcessor: () => (/* reexport safe */ _pyannote_processing_pyannote_js__WEBPACK_IMPORTED_MODULE_9__.PyAnnoteProcessor),
-/* harmony export */   Qwen2VLProcessor: () => (/* reexport safe */ _qwen2_vl_processing_qwen2_vl_js__WEBPACK_IMPORTED_MODULE_10__.Qwen2VLProcessor),
-/* harmony export */   SamProcessor: () => (/* reexport safe */ _sam_processing_sam_js__WEBPACK_IMPORTED_MODULE_11__.SamProcessor),
-/* harmony export */   SpeechT5Processor: () => (/* reexport safe */ _speecht5_processing_speecht5_js__WEBPACK_IMPORTED_MODULE_12__.SpeechT5Processor),
-/* harmony export */   VLChatProcessor: () => (/* reexport safe */ _janus_processing_janus_js__WEBPACK_IMPORTED_MODULE_4__.VLChatProcessor),
-/* harmony export */   Wav2Vec2ProcessorWithLM: () => (/* reexport safe */ _wav2vec2_processing_wav2vec2_js__WEBPACK_IMPORTED_MODULE_13__.Wav2Vec2ProcessorWithLM),
-/* harmony export */   WhisperProcessor: () => (/* reexport safe */ _whisper_processing_whisper_js__WEBPACK_IMPORTED_MODULE_14__.WhisperProcessor)
+/* harmony export */   GroundingDinoProcessor: () => (/* reexport safe */ _grounding_dino_processing_grounding_dino_js__WEBPACK_IMPORTED_MODULE_1__.GroundingDinoProcessor),
+/* harmony export */   Idefics3Processor: () => (/* reexport safe */ _idefics3_processing_idefics3_js__WEBPACK_IMPORTED_MODULE_2__.Idefics3Processor),
+/* harmony export */   JinaCLIPProcessor: () => (/* reexport safe */ _jina_clip_processing_jina_clip_js__WEBPACK_IMPORTED_MODULE_4__.JinaCLIPProcessor),
+/* harmony export */   MgpstrProcessor: () => (/* reexport safe */ _mgp_str_processing_mgp_str_js__WEBPACK_IMPORTED_MODULE_5__.MgpstrProcessor),
+/* harmony export */   MoonshineProcessor: () => (/* reexport safe */ _moonshine_processing_moonshine_js__WEBPACK_IMPORTED_MODULE_6__.MoonshineProcessor),
+/* harmony export */   OwlViTProcessor: () => (/* reexport safe */ _owlvit_processing_owlvit_js__WEBPACK_IMPORTED_MODULE_7__.OwlViTProcessor),
+/* harmony export */   PaliGemmaProcessor: () => (/* reexport safe */ _paligemma_processing_paligemma_js__WEBPACK_IMPORTED_MODULE_9__.PaliGemmaProcessor),
+/* harmony export */   Phi3VProcessor: () => (/* reexport safe */ _phi3_v_processing_phi3_v_js__WEBPACK_IMPORTED_MODULE_8__.Phi3VProcessor),
+/* harmony export */   PyAnnoteProcessor: () => (/* reexport safe */ _pyannote_processing_pyannote_js__WEBPACK_IMPORTED_MODULE_10__.PyAnnoteProcessor),
+/* harmony export */   Qwen2VLProcessor: () => (/* reexport safe */ _qwen2_vl_processing_qwen2_vl_js__WEBPACK_IMPORTED_MODULE_11__.Qwen2VLProcessor),
+/* harmony export */   SamProcessor: () => (/* reexport safe */ _sam_processing_sam_js__WEBPACK_IMPORTED_MODULE_12__.SamProcessor),
+/* harmony export */   SpeechT5Processor: () => (/* reexport safe */ _speecht5_processing_speecht5_js__WEBPACK_IMPORTED_MODULE_13__.SpeechT5Processor),
+/* harmony export */   VLChatProcessor: () => (/* reexport safe */ _janus_processing_janus_js__WEBPACK_IMPORTED_MODULE_3__.VLChatProcessor),
+/* harmony export */   Wav2Vec2Processor: () => (/* reexport safe */ _wav2vec2_processing_wav2vec2_js__WEBPACK_IMPORTED_MODULE_14__.Wav2Vec2Processor),
+/* harmony export */   Wav2Vec2ProcessorWithLM: () => (/* reexport safe */ _wav2vec2_with_lm_processing_wav2vec2_with_lm_js__WEBPACK_IMPORTED_MODULE_15__.Wav2Vec2ProcessorWithLM),
+/* harmony export */   WhisperProcessor: () => (/* reexport safe */ _whisper_processing_whisper_js__WEBPACK_IMPORTED_MODULE_16__.WhisperProcessor)
 /* harmony export */ });
 /* harmony import */ var _florence2_processing_florence2_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./florence2/processing_florence2.js */ "./src/models/florence2/processing_florence2.js");
-/* harmony import */ var _mgp_str_processing_mgp_str_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./mgp_str/processing_mgp_str.js */ "./src/models/mgp_str/processing_mgp_str.js");
-/* harmony import */ var _moonshine_processing_moonshine_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./moonshine/processing_moonshine.js */ "./src/models/moonshine/processing_moonshine.js");
-/* harmony import */ var _idefics3_processing_idefics3_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./idefics3/processing_idefics3.js */ "./src/models/idefics3/processing_idefics3.js");
-/* harmony import */ var _janus_processing_janus_js__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! ./janus/processing_janus.js */ "./src/models/janus/processing_janus.js");
-/* harmony import */ var _jina_clip_processing_jina_clip_js__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(/*! ./jina_clip/processing_jina_clip.js */ "./src/models/jina_clip/processing_jina_clip.js");
-/* harmony import */ var _owlvit_processing_owlvit_js__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(/*! ./owlvit/processing_owlvit.js */ "./src/models/owlvit/processing_owlvit.js");
-/* harmony import */ var _phi3_v_processing_phi3_v_js__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(/*! ./phi3_v/processing_phi3_v.js */ "./src/models/phi3_v/processing_phi3_v.js");
-/* harmony import */ var _paligemma_processing_paligemma_js__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(/*! ./paligemma/processing_paligemma.js */ "./src/models/paligemma/processing_paligemma.js");
-/* harmony import */ var _pyannote_processing_pyannote_js__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(/*! ./pyannote/processing_pyannote.js */ "./src/models/pyannote/processing_pyannote.js");
-/* harmony import */ var _qwen2_vl_processing_qwen2_vl_js__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(/*! ./qwen2_vl/processing_qwen2_vl.js */ "./src/models/qwen2_vl/processing_qwen2_vl.js");
-/* harmony import */ var _sam_processing_sam_js__WEBPACK_IMPORTED_MODULE_11__ = __webpack_require__(/*! ./sam/processing_sam.js */ "./src/models/sam/processing_sam.js");
-/* harmony import */ var _speecht5_processing_speecht5_js__WEBPACK_IMPORTED_MODULE_12__ = __webpack_require__(/*! ./speecht5/processing_speecht5.js */ "./src/models/speecht5/processing_speecht5.js");
-/* harmony import */ var _wav2vec2_processing_wav2vec2_js__WEBPACK_IMPORTED_MODULE_13__ = __webpack_require__(/*! ./wav2vec2/processing_wav2vec2.js */ "./src/models/wav2vec2/processing_wav2vec2.js");
-/* harmony import */ var _whisper_processing_whisper_js__WEBPACK_IMPORTED_MODULE_14__ = __webpack_require__(/*! ./whisper/processing_whisper.js */ "./src/models/whisper/processing_whisper.js");
+/* harmony import */ var _grounding_dino_processing_grounding_dino_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./grounding_dino/processing_grounding_dino.js */ "./src/models/grounding_dino/processing_grounding_dino.js");
+/* harmony import */ var _idefics3_processing_idefics3_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./idefics3/processing_idefics3.js */ "./src/models/idefics3/processing_idefics3.js");
+/* harmony import */ var _janus_processing_janus_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./janus/processing_janus.js */ "./src/models/janus/processing_janus.js");
+/* harmony import */ var _jina_clip_processing_jina_clip_js__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! ./jina_clip/processing_jina_clip.js */ "./src/models/jina_clip/processing_jina_clip.js");
+/* harmony import */ var _mgp_str_processing_mgp_str_js__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(/*! ./mgp_str/processing_mgp_str.js */ "./src/models/mgp_str/processing_mgp_str.js");
+/* harmony import */ var _moonshine_processing_moonshine_js__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(/*! ./moonshine/processing_moonshine.js */ "./src/models/moonshine/processing_moonshine.js");
+/* harmony import */ var _owlvit_processing_owlvit_js__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(/*! ./owlvit/processing_owlvit.js */ "./src/models/owlvit/processing_owlvit.js");
+/* harmony import */ var _phi3_v_processing_phi3_v_js__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(/*! ./phi3_v/processing_phi3_v.js */ "./src/models/phi3_v/processing_phi3_v.js");
+/* harmony import */ var _paligemma_processing_paligemma_js__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(/*! ./paligemma/processing_paligemma.js */ "./src/models/paligemma/processing_paligemma.js");
+/* harmony import */ var _pyannote_processing_pyannote_js__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(/*! ./pyannote/processing_pyannote.js */ "./src/models/pyannote/processing_pyannote.js");
+/* harmony import */ var _qwen2_vl_processing_qwen2_vl_js__WEBPACK_IMPORTED_MODULE_11__ = __webpack_require__(/*! ./qwen2_vl/processing_qwen2_vl.js */ "./src/models/qwen2_vl/processing_qwen2_vl.js");
+/* harmony import */ var _sam_processing_sam_js__WEBPACK_IMPORTED_MODULE_12__ = __webpack_require__(/*! ./sam/processing_sam.js */ "./src/models/sam/processing_sam.js");
+/* harmony import */ var _speecht5_processing_speecht5_js__WEBPACK_IMPORTED_MODULE_13__ = __webpack_require__(/*! ./speecht5/processing_speecht5.js */ "./src/models/speecht5/processing_speecht5.js");
+/* harmony import */ var _wav2vec2_processing_wav2vec2_js__WEBPACK_IMPORTED_MODULE_14__ = __webpack_require__(/*! ./wav2vec2/processing_wav2vec2.js */ "./src/models/wav2vec2/processing_wav2vec2.js");
+/* harmony import */ var _wav2vec2_with_lm_processing_wav2vec2_with_lm_js__WEBPACK_IMPORTED_MODULE_15__ = __webpack_require__(/*! ./wav2vec2_with_lm/processing_wav2vec2_with_lm.js */ "./src/models/wav2vec2_with_lm/processing_wav2vec2_with_lm.js");
+/* harmony import */ var _whisper_processing_whisper_js__WEBPACK_IMPORTED_MODULE_16__ = __webpack_require__(/*! ./whisper/processing_whisper.js */ "./src/models/whisper/processing_whisper.js");
+
+
 
 
 
@@ -20237,14 +20530,52 @@ class Wav2Vec2FeatureExtractor extends _base_feature_extraction_utils_js__WEBPAC
 "use strict";
 __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   Wav2Vec2Processor: () => (/* binding */ Wav2Vec2Processor)
+/* harmony export */ });
+/* harmony import */ var _tokenizers_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ../../tokenizers.js */ "./src/tokenizers.js");
+/* harmony import */ var _auto_feature_extraction_auto_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ../auto/feature_extraction_auto.js */ "./src/models/auto/feature_extraction_auto.js");
+/* harmony import */ var _base_processing_utils_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ../../base/processing_utils.js */ "./src/base/processing_utils.js");
+
+
+
+
+class Wav2Vec2Processor extends _base_processing_utils_js__WEBPACK_IMPORTED_MODULE_2__.Processor {
+    static tokenizer_class = _tokenizers_js__WEBPACK_IMPORTED_MODULE_0__.AutoTokenizer
+    static feature_extractor_class = _auto_feature_extraction_auto_js__WEBPACK_IMPORTED_MODULE_1__.AutoFeatureExtractor
+
+    /**
+     * Calls the feature_extractor function with the given audio input.
+     * @param {any} audio The audio input to extract features from.
+     * @returns {Promise<any>} A Promise that resolves with the extracted features.
+     */
+    async _call(audio) {
+        return await this.feature_extractor(audio)
+    }
+}
+
+
+/***/ }),
+
+/***/ "./src/models/wav2vec2_with_lm/processing_wav2vec2_with_lm.js":
+/*!********************************************************************!*\
+  !*** ./src/models/wav2vec2_with_lm/processing_wav2vec2_with_lm.js ***!
+  \********************************************************************/
+/***/ ((__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) => {
+
+"use strict";
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   Wav2Vec2ProcessorWithLM: () => (/* binding */ Wav2Vec2ProcessorWithLM)
 /* harmony export */ });
-/* harmony import */ var _base_processing_utils_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ../../base/processing_utils.js */ "./src/base/processing_utils.js");
+/* harmony import */ var _tokenizers_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ../../tokenizers.js */ "./src/tokenizers.js");
 /* harmony import */ var _auto_feature_extraction_auto_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ../auto/feature_extraction_auto.js */ "./src/models/auto/feature_extraction_auto.js");
+/* harmony import */ var _base_processing_utils_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ../../base/processing_utils.js */ "./src/base/processing_utils.js");
 
 
 
-class Wav2Vec2ProcessorWithLM extends _base_processing_utils_js__WEBPACK_IMPORTED_MODULE_0__.Processor {
+
+class Wav2Vec2ProcessorWithLM extends _base_processing_utils_js__WEBPACK_IMPORTED_MODULE_2__.Processor {
+    static tokenizer_class = _tokenizers_js__WEBPACK_IMPORTED_MODULE_0__.AutoTokenizer
     static feature_extractor_class = _auto_feature_extraction_auto_js__WEBPACK_IMPORTED_MODULE_1__.AutoFeatureExtractor
 
     /**
@@ -20832,9 +21163,12 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ });
 /* harmony import */ var _backends_onnx_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ../backends/onnx.js */ "./src/backends/onnx.js");
 /* harmony import */ var _utils_tensor_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ../utils/tensor.js */ "./src/utils/tensor.js");
+/* harmony import */ var _env_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ../env.js */ "./src/env.js");
 
 
 
+
+const IS_WEB_ENV = _env_js__WEBPACK_IMPORTED_MODULE_2__.apis.IS_BROWSER_ENV || _env_js__WEBPACK_IMPORTED_MODULE_2__.apis.IS_WEBWORKER_ENV;
 /**
  * Asynchronously creates a wrapper function for running an ONNX inference session.
  *
@@ -20850,10 +21184,16 @@ const wrap = async (session_bytes, session_options, names) => {
     const session = await (0,_backends_onnx_js__WEBPACK_IMPORTED_MODULE_0__.createInferenceSession)(
         new Uint8Array(session_bytes), session_options,
     );
+
+    /** @type {Promise<any>} */
+    let chain = Promise.resolve();
+
     return /** @type {any} */(async (/** @type {Record<string, Tensor>} */ inputs) => {
         const proxied = (0,_backends_onnx_js__WEBPACK_IMPORTED_MODULE_0__.isONNXProxy)();
         const ortFeed = Object.fromEntries(Object.entries(inputs).map(([k, v]) => [k, (proxied ? v.clone() : v).ort_tensor]));
-        const outputs = await session.run(ortFeed);
+
+        // When running in-browser via WASM, we need to chain calls to session.run to avoid "Error: Session already started"
+        const outputs = await (chain = IS_WEB_ENV ? chain.then(() => session.run(ortFeed)) : session.run(ortFeed));
 
         if (Array.isArray(names)) {
             return names.map((n) => new _utils_tensor_js__WEBPACK_IMPORTED_MODULE_1__.Tensor(outputs[n]));
@@ -23512,13 +23852,35 @@ class ZeroShotObjectDetectionPipeline extends (/** @type {new (options: TextImag
             // Run model with both text and pixel inputs
             const output = await this.model({ ...text_inputs, pixel_values });
 
-            // @ts-ignore
-            const processed = this.processor.image_processor.post_process_object_detection(output, threshold, imageSize, true)[0];
-            let result = processed.boxes.map((box, i) => ({
-                score: processed.scores[i],
-                label: candidate_labels[processed.classes[i]],
-                box: get_bounding_box(box, !percentage),
-            })).sort((a, b) => b.score - a.score);
+            let result;
+            if('post_process_grounded_object_detection' in this.processor) {
+                // @ts-ignore
+                const processed = this.processor.post_process_grounded_object_detection(
+                    output,
+                    text_inputs.input_ids,
+                    {
+                        // TODO: support separate threshold values
+                        box_threshold: threshold,
+                        text_threshold: threshold,
+                        target_sizes: imageSize,
+                    },
+                )[0];
+                result = processed.boxes.map((box, i) => ({
+                    score: processed.scores[i],
+                    label: processed.labels[i],
+                    box: get_bounding_box(box, !percentage),
+                }))
+            } else {
+                // @ts-ignore
+                const processed = this.processor.image_processor.post_process_object_detection(output, threshold, imageSize, true)[0];
+                result = processed.boxes.map((box, i) => ({
+                    score: processed.scores[i],
+                    label: candidate_labels[processed.classes[i]],
+                    box: get_bounding_box(box, !percentage),
+                }))
+            }
+            result.sort((a, b) => b.score - a.score);
+
             if (top_k !== null) {
                 result = result.slice(0, top_k);
             }
@@ -23638,7 +24000,7 @@ class DocumentQuestionAnsweringPipeline extends (/** @type {new (options: TextIm
  * const synthesizer = await pipeline('text-to-speech', 'Xenova/speecht5_tts', { quantized: false });
  * const speaker_embeddings = 'https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/speaker_embeddings.bin';
  * const out = await synthesizer('Hello, my dog is cute', { speaker_embeddings });
- * // {
+ * // RawAudio {
  * //   audio: Float32Array(26112) [-0.00005657337896991521, 0.00020583874720614403, ...],
  * //   sampling_rate: 16000
  * // }
@@ -23658,7 +24020,7 @@ class DocumentQuestionAnsweringPipeline extends (/** @type {new (options: TextIm
  * ```javascript
  * const synthesizer = await pipeline('text-to-speech', 'Xenova/mms-tts-fra');
  * const out = await synthesizer('Bonjour');
- * // {
+ * // RawAudio {
  * //   audio: Float32Array(23808) [-0.00037693005288019776, 0.0003325853613205254, ...],
  * //   sampling_rate: 16000
  * // }
@@ -23705,10 +24067,10 @@ class TextToAudioPipeline extends (/** @type {new (options: TextToAudioPipelineC
 
         // @ts-expect-error TS2339
         const sampling_rate = this.model.config.sampling_rate;
-        return {
-            audio: waveform.data,
+        return new _utils_audio_js__WEBPACK_IMPORTED_MODULE_7__.RawAudio(
+            waveform.data,
             sampling_rate,
-        }
+        )
     }
 
     async _call_text_to_spectrogram(text_inputs, { speaker_embeddings }) {
@@ -23748,10 +24110,10 @@ class TextToAudioPipeline extends (/** @type {new (options: TextToAudioPipelineC
         const { waveform } = await this.model.generate_speech(input_ids, speaker_embeddings, { vocoder: this.vocoder });
 
         const sampling_rate = this.processor.feature_extractor.config.sampling_rate;
-        return {
-            audio: waveform.data,
+        return new _utils_audio_js__WEBPACK_IMPORTED_MODULE_7__.RawAudio(
+            waveform.data,
             sampling_rate,
-        }
+        )
     }
 }
 
@@ -24777,13 +25139,15 @@ class TokenizerModel extends _utils_generic_js__WEBPACK_IMPORTED_MODULE_0__.Call
                 return new BPE(config);
 
             default:
-                // Some tokenizers, like for google-t5/t5-small, do not have a `type` field.
-                // In this case, we can infer the tokenizer type based on the structure of the `vocab` field.
+                // Some older tokenizers, like `google-t5/t5-small` and `distilbert/distilbert-base-uncased`, do not have a `type` field.
+                // In this case, we can infer the tokenizer type based on the structure of the `vocab` field and other properties.
                 if (config.vocab) {
                     if (Array.isArray(config.vocab)) {
                         // config.vocab is of type `[string, number][]`
                         // @ts-ignore
                         return new Unigram(config, ...args);
+                    } else if (typeof config.vocab === 'object' && config.continuing_subword_prefix && config.unk_token) {
+                        return new WordPieceTokenizer(config);
                     } else {
                         // @ts-ignore
                         return new LegacyTokenizerModel(config, ...args);
@@ -28797,6 +29161,7 @@ class AutoTokenizer {
 "use strict";
 __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   RawAudio: () => (/* binding */ RawAudio),
 /* harmony export */   hamming: () => (/* binding */ hamming),
 /* harmony export */   hanning: () => (/* binding */ hanning),
 /* harmony export */   mel_filter_bank: () => (/* binding */ mel_filter_bank),
@@ -28807,7 +29172,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _hub_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./hub.js */ "./src/utils/hub.js");
 /* harmony import */ var _maths_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./maths.js */ "./src/utils/maths.js");
 /* harmony import */ var _core_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./core.js */ "./src/utils/core.js");
-/* harmony import */ var _tensor_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./tensor.js */ "./src/utils/tensor.js");
+/* harmony import */ var _env_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ../env.js */ "./src/env.js");
+/* harmony import */ var fs__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! fs */ "fs");
+/* harmony import */ var _tensor_js__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(/*! ./tensor.js */ "./src/utils/tensor.js");
 /**
  * @file Helper module for audio processing. 
  * 
@@ -28816,6 +29183,8 @@ __webpack_require__.r(__webpack_exports__);
  * 
  * @module utils/audio
  */
+
+
 
 
 
@@ -29416,10 +29785,10 @@ async function spectrogram(
     //  - mel_filters.shape=(80, 201)
     //  - magnitudes.shape=(3000, 201) => magnitudes.T.shape=(201, 3000)
     //  - mel_spec.shape=(80, 3000)
-    let mel_spec = await (0,_tensor_js__WEBPACK_IMPORTED_MODULE_3__.matmul)(
+    let mel_spec = await (0,_tensor_js__WEBPACK_IMPORTED_MODULE_5__.matmul)(
         // TODO: Make `mel_filters` a Tensor during initialization
-        new _tensor_js__WEBPACK_IMPORTED_MODULE_3__.Tensor('float32', mel_filters.flat(), [num_mel_filters, num_frequency_bins]),
-        new _tensor_js__WEBPACK_IMPORTED_MODULE_3__.Tensor('float32', transposedMagnitudeData, [num_frequency_bins, d1Max]),
+        new _tensor_js__WEBPACK_IMPORTED_MODULE_5__.Tensor('float32', mel_filters.flat(), [num_mel_filters, num_frequency_bins]),
+        new _tensor_js__WEBPACK_IMPORTED_MODULE_5__.Tensor('float32', transposedMagnitudeData, [num_frequency_bins, d1Max]),
     );
     if (transpose) {
         mel_spec = mel_spec.transpose(1, 0);
@@ -29509,6 +29878,116 @@ function window_function(window_length, name, {
     return window;
 }
 
+/**
+ * Encode audio data to a WAV file.
+ * WAV file specs : https://en.wikipedia.org/wiki/WAV#WAV_File_header
+ * 
+ * Adapted from https://www.npmjs.com/package/audiobuffer-to-wav
+ * @param {Float32Array} samples The audio samples.
+ * @param {number} rate The sample rate.
+ * @returns {ArrayBuffer} The WAV audio buffer.
+ */
+function encodeWAV(samples, rate) {
+    let offset = 44;
+    const buffer = new ArrayBuffer(offset + samples.length * 4);
+    const view = new DataView(buffer);
+
+    /* RIFF identifier */
+    writeString(view, 0, "RIFF");
+    /* RIFF chunk length */
+    view.setUint32(4, 36 + samples.length * 4, true);
+    /* RIFF type */
+    writeString(view, 8, "WAVE");
+    /* format chunk identifier */
+    writeString(view, 12, "fmt ");
+    /* format chunk length */
+    view.setUint32(16, 16, true);
+    /* sample format (raw) */
+    view.setUint16(20, 3, true);
+    /* channel count */
+    view.setUint16(22, 1, true);
+    /* sample rate */
+    view.setUint32(24, rate, true);
+    /* byte rate (sample rate * block align) */
+    view.setUint32(28, rate * 4, true);
+    /* block align (channel count * bytes per sample) */
+    view.setUint16(32, 4, true);
+    /* bits per sample */
+    view.setUint16(34, 32, true);
+    /* data chunk identifier */
+    writeString(view, 36, "data");
+    /* data chunk length */
+    view.setUint32(40, samples.length * 4, true);
+
+    for (let i = 0; i < samples.length; ++i, offset += 4) {
+        view.setFloat32(offset, samples[i], true);
+    }
+
+    return buffer;
+}
+
+function writeString(view, offset, string) {
+    for (let i = 0; i < string.length; ++i) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+    }
+}
+
+
+class RawAudio {
+
+    /**
+     * Create a new `RawAudio` object.
+     * @param {Float32Array} audio Audio data
+     * @param {number} sampling_rate Sampling rate of the audio data
+     */
+    constructor(audio, sampling_rate) {
+        this.audio = audio
+        this.sampling_rate = sampling_rate
+    }
+
+    /**
+     * Convert the audio to a wav file buffer.
+     * @returns {ArrayBuffer} The WAV file.
+     */
+    toWav() {
+        return encodeWAV(this.audio, this.sampling_rate)
+    }
+
+    /**
+     * Convert the audio to a blob.
+     * @returns {Blob}
+     */
+    toBlob() {
+        const wav = this.toWav();
+        const blob = new Blob([wav], { type: 'audio/wav' });
+        return blob;
+    }
+
+    /**
+     * Save the audio to a wav file.
+     * @param {string} path
+     */
+    async save(path) {
+        let fn;
+
+        if (_env_js__WEBPACK_IMPORTED_MODULE_3__.apis.IS_BROWSER_ENV) {
+            if (_env_js__WEBPACK_IMPORTED_MODULE_3__.apis.IS_WEBWORKER_ENV) {
+                throw new Error('Unable to save a file from a Web Worker.')
+            }
+            fn = _core_js__WEBPACK_IMPORTED_MODULE_2__.saveBlob;
+        } else if (_env_js__WEBPACK_IMPORTED_MODULE_3__.apis.IS_FS_AVAILABLE) {
+            fn = async (/** @type {string} */ path, /** @type {Blob} */ blob) => {
+                let buffer = await blob.arrayBuffer();
+                fs__WEBPACK_IMPORTED_MODULE_4__.writeFileSync(path, Buffer.from(buffer));
+            }
+        } else {
+            throw new Error('Unable to save because filesystem is disabled in this environment.')
+        }
+
+        await fn(path, this.toBlob())
+    }
+}
+
 
 /***/ }),
 
@@ -29564,7 +30043,8 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   pick: () => (/* binding */ pick),
 /* harmony export */   pop: () => (/* binding */ pop),
 /* harmony export */   product: () => (/* binding */ product),
-/* harmony export */   reverseDictionary: () => (/* binding */ reverseDictionary)
+/* harmony export */   reverseDictionary: () => (/* binding */ reverseDictionary),
+/* harmony export */   saveBlob: () => (/* binding */ saveBlob)
 /* harmony export */ });
 
 /**
@@ -29755,6 +30235,32 @@ function product(...a) {
  */
 function calculateReflectOffset(i, w) {
     return Math.abs((i + w) % (2 * w) - w);
+}
+
+/**
+ * Save blob file on the web.
+ * @param {string} path The path to save the blob to
+ * @param {Blob} blob The blob to save
+ */
+function saveBlob(path, blob){
+    // Convert the canvas content to a data URL
+    const dataURL = URL.createObjectURL(blob);
+
+    // Create an anchor element with the data URL as the href attribute
+    const downloadLink = document.createElement('a');
+    downloadLink.href = dataURL;
+
+    // Set the download attribute to specify the desired filename for the downloaded image
+    downloadLink.download = path;
+
+    // Trigger the download
+    downloadLink.click();
+
+    // Clean up: remove the anchor element from the DOM
+    downloadLink.remove();
+
+    // Revoke the Object URL to free up memory
+    URL.revokeObjectURL(dataURL);
 }
 
 /**
@@ -31939,23 +32445,9 @@ class RawImage {
             // Convert image to Blob
             const blob = await this.toBlob(mime);
 
-            // Convert the canvas content to a data URL
-            const dataURL = URL.createObjectURL(blob);
+            (0,_core_js__WEBPACK_IMPORTED_MODULE_0__.saveBlob)(path, blob)
 
-            // Create an anchor element with the data URL as the href attribute
-            const downloadLink = document.createElement('a');
-            downloadLink.href = dataURL;
-
-            // Set the download attribute to specify the desired filename for the downloaded image
-            downloadLink.download = path;
-
-            // Trigger the download
-            downloadLink.click();
-
-            // Clean up: remove the anchor element from the DOM
-            downloadLink.remove();
-
-        } else if (!_env_js__WEBPACK_IMPORTED_MODULE_2__.env.useFS) {
+        } else if (!_env_js__WEBPACK_IMPORTED_MODULE_2__.apis.IS_FS_AVAILABLE) {
             throw new Error('Unable to save the image because filesystem is disabled in this environment.')
 
         } else {
@@ -31983,6 +32475,7 @@ class RawImage {
  * Helper function to load an image from a URL, path, etc.
  */
 const load_image = RawImage.read.bind(RawImage);
+
 
 
 /***/ }),
@@ -33600,55 +34093,22 @@ class Tensor {
         }
 
         const this_data = this.data;
+        const fn = (a, b) => a + (b ** p);
 
         if (dim === null) {
             // @ts-ignore
-            let val = this_data.reduce((a, b) => a + (b ** p), 0) ** (1 / p);
+            const val = this_data.reduce(fn, 0) ** (1 / p);
             return new Tensor(this.type, [val], []);
         }
 
-        // Negative indexing
-        dim = safeIndex(dim, this.dims.length);
-
-        // Calculate the shape of the resulting array after summation
-        const resultDims = this.dims.slice(); // Copy the original dimensions
-        resultDims[dim] = 1; // Remove the specified axis
-
-        // Create a new array to store the accumulated values
-        // @ts-ignore
-        const result = new this_data.constructor(this_data.length / this.dims[dim]);
-
-        // Iterate over the data array
-        for (let i = 0; i < this_data.length; ++i) {
-
-            // Calculate the index in the resulting array
-            let resultIndex = 0;
-
-            for (let j = this.dims.length - 1, num = i, resultMultiplier = 1; j >= 0; --j) {
-                const size = this.dims[j];
-                if (j !== dim) {
-                    const index = num % size;
-                    resultIndex += index * resultMultiplier;
-                    resultMultiplier *= resultDims[j];
-                }
-                num = Math.floor(num / size);
-            }
-
-            // Accumulate the value at the current index
-            result[resultIndex] += (this_data[i]) ** p;
-        }
+        const [type, result, resultDims] = reduce_helper(fn, this, dim, keepdim);
 
         if (p !== 1) {
             for (let i = 0; i < result.length; ++i) {
                 result[i] = result[i] ** (1 / p);
             }
         }
-
-        if (!keepdim) {
-            resultDims.splice(dim, 1);
-        }
-
-        return new Tensor(this.type, result, resultDims);
+        return new Tensor(type, result, resultDims);
     }
 
     /**
@@ -33711,7 +34171,7 @@ class Tensor {
      * NOTE: The returned tensor shares the storage with the input tensor, so changing the contents of one will change the contents of the other.
      * If you would like a copy, use `tensor.clone()` before squeezing.
      *
-     * @param {number} [dim=null] If given, the input will be squeezed only in the specified dimensions.
+     * @param {number|number[]} [dim=null] If given, the input will be squeezed only in the specified dimensions.
      * @returns {Tensor} The squeezed tensor
      */
     squeeze(dim = null) {
@@ -33822,6 +34282,34 @@ class Tensor {
     }
 
     /**
+     * Computes input > val element-wise.
+     * @param {number} val The value to compare with.
+     * @returns {Tensor} A boolean tensor that is `true` where input is greater than other and `false` elsewhere.
+     */
+    gt(val) {
+        const mask = new Uint8Array(this.data.length);
+        const this_data = this.data;
+        for (let i = 0; i < this_data.length; ++i) {
+            mask[i] = this_data[i] > val ? 1 : 0;
+        }
+        return new Tensor('bool', mask, this.dims);
+    }
+
+    /**
+     * Computes input < val element-wise.
+     * @param {number} val The value to compare with.
+     * @returns {Tensor} A boolean tensor that is `true` where input is less than other and `false` elsewhere.
+     */
+    lt(val) {
+        const mask = new Uint8Array(this.data.length);
+        const this_data = this.data;
+        for (let i = 0; i < this_data.length; ++i) {
+            mask[i] = this_data[i] < val ? 1 : 0;
+        }
+        return new Tensor('bool', mask, this.dims);
+    }
+
+    /**
      * In-place version of @see {@link Tensor.clamp}
      */
     clamp_(min, max) {
@@ -33866,18 +34354,23 @@ class Tensor {
     }
 
     min(dim = null, keepdim = false) {
-        if (dim !== null) {
-            throw new Error("`dim !== null` not yet implemented.");
+        if (dim === null) {
+            // None to reduce over all dimensions.
+            const val = (0,_maths_js__WEBPACK_IMPORTED_MODULE_0__.min)(this.data)[0];
+            return new Tensor(this.type, [val], [/* scalar */]);
         }
-        const value = (0,_maths_js__WEBPACK_IMPORTED_MODULE_0__.min)(this.data)[0];
-        return new Tensor(this.type, [value], []);
+        const [type, result, resultDims] = reduce_helper((a, b) => Math.min(a, b), this, dim, keepdim, Infinity);
+        return new Tensor(type, result, resultDims);
     }
+
     max(dim = null, keepdim = false) {
-        if (dim !== null) {
-            throw new Error("`dim !== null` not yet implemented.");
+        if (dim === null) {
+            // None to reduce over all dimensions.
+            const val = (0,_maths_js__WEBPACK_IMPORTED_MODULE_0__.max)(this.data)[0];
+            return new Tensor(this.type, [val], [/* scalar */]);
         }
-        const value = (0,_maths_js__WEBPACK_IMPORTED_MODULE_0__.max)(this.data)[0];
-        return new Tensor(this.type, [value], []);
+        const [type, result, resultDims] = reduce_helper((a, b) => Math.max(a, b), this, dim, keepdim, -Infinity);
+        return new Tensor(type, result, resultDims);
     }
 
     argmin(dim = null, keepdim = false) {
@@ -34374,6 +34867,57 @@ function stack(tensors, dim = 0) {
 
 
 /**
+ * @param {(previousValue: any, currentValue: any, currentIndex?: number, resultIndex?: number) => any} callbackfn
+ * @param {Tensor} input the input tensor.
+ * @param {number|null} dim the dimension to reduce.
+ * @param {boolean} keepdim whether the output tensor has dim retained or not.
+ * @returns {[DataType, any, number[]]} The reduced tensor data.
+ */
+function reduce_helper(callbackfn, input, dim = null, keepdim = false, initialValue = null) {
+    const inputData = input.data;
+    const inputDims = input.dims;
+
+    // Negative indexing
+    dim = safeIndex(dim, inputDims.length);
+
+    // Calculate the shape of the resulting array after summation
+    const resultDims = inputDims.slice(); // Copy the original dimensions
+    resultDims[dim] = 1; // Remove the specified axis
+
+    // Create a new array to store the accumulated values
+    // @ts-ignore
+    const result = new inputData.constructor(inputData.length / inputDims[dim]);
+    if (initialValue !== null) {
+        result.fill(initialValue);
+    }
+
+    // Iterate over the data array
+    for (let i = 0; i < inputData.length; ++i) {
+
+        // Calculate the index in the resulting array
+        let resultIndex = 0;
+
+        for (let j = inputDims.length - 1, num = i, resultMultiplier = 1; j >= 0; --j) {
+            const size = inputDims[j];
+            if (j !== dim) {
+                const index = num % size;
+                resultIndex += index * resultMultiplier;
+                resultMultiplier *= resultDims[j];
+            }
+            num = Math.floor(num / size);
+        }
+
+        // Accumulate the value at the current index
+        result[resultIndex] = callbackfn(result[resultIndex], inputData[i], i, resultIndex);
+    }
+
+    if (!keepdim) resultDims.splice(dim, 1);
+
+    return [input.type, result, resultDims];
+}
+
+
+/**
  * Calculates the standard deviation and mean over the dimensions specified by dim. dim can be a single dimension or `null` to reduce over all dimensions.
  * @param {Tensor} input the input tenso
  * @param {number|null} dim the dimension to reduce. If None, all dimensions are reduced.
@@ -34396,54 +34940,22 @@ function std_mean(input, dim = null, correction = 1, keepdim = false) {
 
         return [stdTensor, meanTensor];
     }
-
-    // Negative indexing
     dim = safeIndex(dim, inputDims.length);
-
     const meanTensor = mean(input, dim, keepdim);
     const meanTensorData = meanTensor.data;
 
-    // Calculate the shape of the resulting array after summation
-    const resultDims = inputDims.slice(); // Copy the original dimensions
-    resultDims[dim] = 1; // Remove the specified axis
+    // Compute squared sum
+    const [type, result, resultDims] = reduce_helper((a, b, i, j) => a + (b - meanTensorData[j]) ** 2, input, dim, keepdim);
 
-    // Create a new array to store the accumulated values
-    // @ts-ignore
-    const result = new inputData.constructor(inputData.length / inputDims[dim]);
-
-    // Iterate over the data array
-    for (let i = 0; i < inputData.length; ++i) {
-
-        // Calculate the index in the resulting array
-        let resultIndex = 0;
-
-        for (let j = inputDims.length - 1, num = i, resultMultiplier = 1; j >= 0; --j) {
-            const size = inputDims[j];
-            if (j !== dim) {
-                const index = num % size;
-                resultIndex += index * resultMultiplier;
-                resultMultiplier *= resultDims[j];
-            }
-            num = Math.floor(num / size);
-        }
-
-        // Accumulate the value at the current index
-        result[resultIndex] += (inputData[i] - meanTensorData[resultIndex]) ** 2;
-    }
-
+    // Square root of the squared sum
     for (let i = 0; i < result.length; ++i) {
         result[i] = Math.sqrt(result[i] / (inputDims[dim] - correction));
     }
 
-    if (!keepdim) {
-        resultDims.splice(dim, 1);
-    }
-
-    const stdTensor = new Tensor(input.type, result, resultDims);
+    const stdTensor = new Tensor(type, result, resultDims);
 
     return [stdTensor, meanTensor];
 }
-
 
 /**
  * Returns the mean value of each row of the input tensor in the given dimension dim.
@@ -34453,58 +34965,27 @@ function std_mean(input, dim = null, correction = 1, keepdim = false) {
  * @returns {Tensor} A new tensor with means taken along the specified dimension.
  */
 function mean(input, dim = null, keepdim = false) {
+    const inputDims = input.dims;
     const inputData = /** @type {Float32Array} */(input.data);
 
     if (dim === null) {
         // None to reduce over all dimensions.
-        // @ts-ignore
         const val = inputData.reduce((a, b) => a + b, 0);
         return new Tensor(input.type, [val / inputData.length], [/* scalar */]);
     }
-    const inputDims = input.dims;
-
-    // Negative indexing
     dim = safeIndex(dim, inputDims.length);
 
-    // Calculate the shape of the resulting array after summation
-    const resultDims = inputDims.slice(); // Copy the original dimensions
-    resultDims[dim] = 1; // Remove the specified axis
+    // Compute sum
+    const [type, result, resultDims] = reduce_helper((a, b) => a + b, input, dim, keepdim);
 
-    // Create a new array to store the accumulated values
-    // @ts-ignore
-    const result = new inputData.constructor(inputData.length / inputDims[dim]);
-
-    // Iterate over the data array
-    for (let i = 0; i < inputData.length; ++i) {
-
-        // Calculate the index in the resulting array
-        let resultIndex = 0;
-
-        for (let j = inputDims.length - 1, num = i, resultMultiplier = 1; j >= 0; --j) {
-            const size = inputDims[j];
-            if (j !== dim) {
-                const index = num % size;
-                resultIndex += index * resultMultiplier;
-                resultMultiplier *= resultDims[j];
-            }
-            num = Math.floor(num / size);
-        }
-
-        // Accumulate the value at the current index
-        result[resultIndex] += inputData[i];
-    }
-
+    // Divide by number of elements in the dimension
     if (inputDims[dim] !== 1) {
         for (let i = 0; i < result.length; ++i) {
-            result[i] = result[i] / inputDims[dim];
+            result[i] /= inputDims[dim];
         }
     }
 
-    if (!keepdim) {
-        resultDims.splice(dim, 1);
-    }
-
-    return new Tensor(input.type, result, resultDims);
+    return new Tensor(type, result, resultDims);
 }
 
 
@@ -35000,12 +35481,22 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   GemmaModel: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.GemmaModel),
 /* harmony export */   GemmaPreTrainedModel: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.GemmaPreTrainedModel),
 /* harmony export */   GemmaTokenizer: () => (/* reexport safe */ _tokenizers_js__WEBPACK_IMPORTED_MODULE_3__.GemmaTokenizer),
+/* harmony export */   GlmForCausalLM: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.GlmForCausalLM),
+/* harmony export */   GlmModel: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.GlmModel),
+/* harmony export */   GlmPreTrainedModel: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.GlmPreTrainedModel),
 /* harmony export */   GraniteForCausalLM: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.GraniteForCausalLM),
 /* harmony export */   GraniteModel: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.GraniteModel),
 /* harmony export */   GranitePreTrainedModel: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.GranitePreTrainedModel),
 /* harmony export */   Grok1Tokenizer: () => (/* reexport safe */ _tokenizers_js__WEBPACK_IMPORTED_MODULE_3__.Grok1Tokenizer),
+/* harmony export */   GroundingDinoForObjectDetection: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.GroundingDinoForObjectDetection),
+/* harmony export */   GroundingDinoImageProcessor: () => (/* reexport safe */ _models_image_processors_js__WEBPACK_IMPORTED_MODULE_13__.GroundingDinoImageProcessor),
+/* harmony export */   GroundingDinoPreTrainedModel: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.GroundingDinoPreTrainedModel),
+/* harmony export */   GroundingDinoProcessor: () => (/* reexport safe */ _models_processors_js__WEBPACK_IMPORTED_MODULE_16__.GroundingDinoProcessor),
 /* harmony export */   GroupViTModel: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.GroupViTModel),
 /* harmony export */   GroupViTPreTrainedModel: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.GroupViTPreTrainedModel),
+/* harmony export */   HeliumForCausalLM: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.HeliumForCausalLM),
+/* harmony export */   HeliumModel: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.HeliumModel),
+/* harmony export */   HeliumPreTrainedModel: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.HeliumPreTrainedModel),
 /* harmony export */   HerbertTokenizer: () => (/* reexport safe */ _tokenizers_js__WEBPACK_IMPORTED_MODULE_3__.HerbertTokenizer),
 /* harmony export */   HieraForImageClassification: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.HieraForImageClassification),
 /* harmony export */   HieraModel: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.HieraModel),
@@ -35233,6 +35724,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   RTDetrModel: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.RTDetrModel),
 /* harmony export */   RTDetrObjectDetectionOutput: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.RTDetrObjectDetectionOutput),
 /* harmony export */   RTDetrPreTrainedModel: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.RTDetrPreTrainedModel),
+/* harmony export */   RawAudio: () => (/* reexport safe */ _utils_audio_js__WEBPACK_IMPORTED_MODULE_5__.RawAudio),
 /* harmony export */   RawImage: () => (/* reexport safe */ _utils_image_js__WEBPACK_IMPORTED_MODULE_6__.RawImage),
 /* harmony export */   RepetitionPenaltyLogitsProcessor: () => (/* reexport safe */ _generation_logits_process_js__WEBPACK_IMPORTED_MODULE_20__.RepetitionPenaltyLogitsProcessor),
 /* harmony export */   ResNetForImageClassification: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.ResNetForImageClassification),
@@ -35298,6 +35790,8 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   Starcoder2PreTrainedModel: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.Starcoder2PreTrainedModel),
 /* harmony export */   StoppingCriteria: () => (/* reexport safe */ _generation_stopping_criteria_js__WEBPACK_IMPORTED_MODULE_19__.StoppingCriteria),
 /* harmony export */   StoppingCriteriaList: () => (/* reexport safe */ _generation_stopping_criteria_js__WEBPACK_IMPORTED_MODULE_19__.StoppingCriteriaList),
+/* harmony export */   StyleTextToSpeech2Model: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.StyleTextToSpeech2Model),
+/* harmony export */   StyleTextToSpeech2PreTrainedModel: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.StyleTextToSpeech2PreTrainedModel),
 /* harmony export */   SummarizationPipeline: () => (/* reexport safe */ _pipelines_js__WEBPACK_IMPORTED_MODULE_1__.SummarizationPipeline),
 /* harmony export */   SuppressTokensAtBeginLogitsProcessor: () => (/* reexport safe */ _generation_logits_process_js__WEBPACK_IMPORTED_MODULE_20__.SuppressTokensAtBeginLogitsProcessor),
 /* harmony export */   Swin2SRForImageSuperResolution: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.Swin2SRForImageSuperResolution),
@@ -35373,6 +35867,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   Wav2Vec2ForSequenceClassification: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.Wav2Vec2ForSequenceClassification),
 /* harmony export */   Wav2Vec2Model: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.Wav2Vec2Model),
 /* harmony export */   Wav2Vec2PreTrainedModel: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.Wav2Vec2PreTrainedModel),
+/* harmony export */   Wav2Vec2Processor: () => (/* reexport safe */ _models_processors_js__WEBPACK_IMPORTED_MODULE_16__.Wav2Vec2Processor),
 /* harmony export */   Wav2Vec2ProcessorWithLM: () => (/* reexport safe */ _models_processors_js__WEBPACK_IMPORTED_MODULE_16__.Wav2Vec2ProcessorWithLM),
 /* harmony export */   WavLMForAudioFrameClassification: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.WavLMForAudioFrameClassification),
 /* harmony export */   WavLMForCTC: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.WavLMForCTC),
