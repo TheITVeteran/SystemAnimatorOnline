@@ -668,9 +668,9 @@
 				},
 				"mocap_options": {
 					"_translation_": {
-						"_default_": "1. Body tracking options\n2. Hand tracking options\n3. Face tracking options\n4. Object tracking optionsⓋ\n5. Mocap data smoothing: <smoothing>\n6. Webcam angle offset correction\n7. Clear bounding box",
-						"ja": "1. ボディトラッキング設定\n2. ハンドトラッキング設定\n3. フェイストラッキング設定\n4. オブジェクトトラッキング設定Ⓥ\n5. モーキャプデータ平滑化: <smoothing>\n6. Webカメラの角度オフセット補正\n7. 境界ボックスをクリアする",
-						"zh": "1. 身體追蹤設定\n2. 手部追蹤設定\n3. 面部追蹤設定\n4. 物體追蹤設定Ⓥ\n5. 動作捕捉數據平滑化: <smoothing>\n6. 攝影機角度偏移補正\n7. 清除邊界框"
+						"_default_": "1. Body tracking options\n2. Hand tracking options\n3. Face tracking options\n4. Object tracking optionsⓋ\n5. Mocap data smoothing: <smoothing>\n6. Upper body blend modeⓋ: <upper_body_blend_mode>\n7. Webcam angle offset correction\n8. Clear bounding box",
+						"ja": "1. ボディトラッキング設定\n2. ハンドトラッキング設定\n3. フェイストラッキング設定\n4. オブジェクトトラッキング設定Ⓥ\n5. モーキャプデータ平滑化: <smoothing>\n6. 上半身ブレンドモードⓋ: <upper_body_blend_mode>\n7. Webカメラの角度オフセット補正\n8. 境界ボックスをクリアする",
+						"zh": "1. 身體追蹤設定\n2. 手部追蹤設定\n3. 面部追蹤設定\n4. 物體追蹤設定Ⓥ\n5. 動作捕捉數據平滑化: <smoothing>\n6. 上半身混合模式Ⓥ: <upper_body_blend_mode>\n7. 攝影機角度偏移補正\n8. 清除邊界框"
 					},
 					"body_tracking_options": {
 						"AI_model_quality": {
@@ -821,7 +821,7 @@
 							},
 							"tooltip": {
 								"_translation_": {
-									"_default_": "During upper body mocap, if you have to place the camera sideway so that you are not facing the camera straightly most of the time (such as during musical instrument mocap), use this setting to offset the upper body rotation by adjusting the rotation of your avatar's root. Default is \"0°\".",
+									"_default_": "During upper body mocap, if you have to place the camera sideways so that you are not facing the camera straightly most of the time (such as during musical instrument mocap), use this setting to offset the upper body rotation by adjusting the rotation of your avatar's root. Default is \"0°\".",
 									"ja": "上半身のモーキャプ中に、カメラを横向きに配置して、ほとんどの場合カメラに正面を向かないようにする必要がある場合 (楽器のモーキャプ中など)、この設定を使用して、アバターのルートの回転を調整することで上半身の回転をオフセットします。 デフォルトは「0°」です。",
 									"zh": "在進行上半身動作捕捉時，如果您必須將相機側放，以致大多數時間都無法直視相機（例如在進行樂器動作捕捉時），請使用此設定透過調整人物模型根部的旋轉來抵消上半身旋轉。 預設是「0°」。"
 								}
@@ -834,7 +834,7 @@
 								},
 								"tooltip": {
 									"_translation_": {
-										"_default_": "Inverted:\nWhen the setting is on, an inverted rotation offset is applied to the upper body instead of the root, so that your avatar will be facing forward instead of sideway. This is essential in some cases when a forward-facing avatar is a must. Default is \"OFF\".",
+										"_default_": "Inverted:\nWhen the setting is on, an inverted rotation offset is applied to the upper body instead of the root, so that your avatar will be facing forward instead of sideways. This is essential in some cases when a forward-facing avatar is a must. Default is \"OFF\".",
 										"ja": "反転:\nこの設定をオンにすると、ルートではなく上半身に反転回転オフセットが適用され、アバターが横向きではなく前向きになります。 これは、前向きのアバターが必要な場合に不可欠です。 デフォルトは「OFF」です。",
 										"zh": "倒轉:\n當此設定為有效時，會將反向旋轉偏移應用於上身而不是根部，這樣您的人物就會面向前方而不是側面。 當在某些情況下人物有必要面向前方時，這設定變得不可或缺。 預設是「OFF」。"
 									}
@@ -1849,6 +1849,22 @@
 								"_default_": "Mocap data smoothing:\nThis option determines how much smoothing should be applied to real-time mocap and motion recording. Less smoothing preserves more motion details, but increases jitters during subtle motion. \"Min\" uses no extra smoothing other than the minimum required. Default is \"Normal\".",
 								"ja": "モーキャプデータ平滑化:\nこのオプションは、リアルタイムのモーションキャプチャとモーション記録にどの程度のスムージングを適用するかを決定します。 スムージングを少なくすると、より多くのモーションの詳細が保持されますが、微妙なモーションの際の不安定性が増します。 「最小」では、必要最小限以外の追加のスムージングは使用されません。 デフォルトは「普通」です。",
 								"zh": "動作捕捉數據平滑化:\n此選項決定應對實時動作捕捉和動作記錄應用多少平滑度。 較少的平滑可以保留更多的動作細節，但代價是細微的動作會增加不穩定性。 「最小」除了所需的最小值之外，不會使用額外的平滑。 預設為「普通」。"
+							}
+						}
+					},
+					"upper_body_blend_mode": {
+						"tooltip": {
+							"_translation_": {
+								"_default_": "Upper_body_blend_mode:\nThis option determines how upper body mocap is blended with preloaded pose/motion. By default, mocap basically keeps the same orientation as the webcam regardless of the preloaded one, which works better with static pose. \"Simple\" mode simply adds the mocap motion on top of the preloaded one, which works better with vigorous motion.",
+								"ja": "上半身ブレンドモード:\nこの設定は、上半身のモーキャプをプリロード済みのポーズ/モーションとどのようにブレンドするかを決定します。 デフォルトでは、モーキャプはプリロード済みのポーズに関わらず、基本的にWebカメラと同じ向きを維持するため、静的なポーズに適しています。 「シンプル」では、プリロード済みのモーションの上にモーキャプのモーションを追加するだけなので、激しい動きに適しています。",
+								"zh": "上半身混合模式:\n此選項決定上身動作捕捉如何與預先載入的姿勢/動作融合。 預設情況下，無論預先載入的姿勢如何面向，動作捕捉基本上都會與網路攝影機保持相同的方向，這對於靜態姿勢來說效果更好。 「簡單」模式只是在預先載入的動作上加入了動作捕捉動作，這對於劇烈動作來說效果更好。"
+							}
+						},
+						"simple": {
+							"_translation_": {
+								"_default_": "Simple",
+								"ja": "シンプル",
+								"zh": "簡單"
 							}
 						}
 					},
@@ -2995,9 +3011,9 @@
 					},
 					"message": {
 						"_translation_": {
-							"_default_": "1. ⌨️Hotkey list and options\n2. 🎮Gamepad options\n3. VRM joint stiffness: <VRM_joint_stiffness_percent>%➕➖\n4. Audio visualizer: <audio_visualizer>\n5. Export all settings\n6. Reset all settings\n7. Done",
-							"ja": "1. ⌨️ホットキーの一覧とオプション\n2. 🎮ゲームパッドのオプション\n3. VRM 関節の剛性: <VRM_joint_stiffness_percent>%➕➖\n4. オーディオ視覚効果: <audio_visualizer>\n5. すべての設定をエクスポートする\n6. すべての設定をリセットする\n7. 終了",
-							"zh": "1. ⌨️熱鍵列表及設定\n2. 🎮遊戲手把選項\n3. VRM 關節剛度: <VRM_joint_stiffness_percent>%➕➖\n4. 音訊視覺化工具: <audio_visualizer>\n5. 匯出所有設定\n6. 重置所有設定\n7. 結束"
+							"_default_": "1. ⌨️Hotkey list and options\n2. 🎮Gamepad options\n3. VRM joint stiffness: <VRM_joint_stiffness_percent>%➕➖\n4. Audio visualizer: <audio_visualizer>\n5. BVH loader mode: <BVH_loader_mode>\n6. Export all settings\n7. Reset all settings\n8. Done",
+							"ja": "1. ⌨️ホットキーの一覧とオプション\n2. 🎮ゲームパッドのオプション\n3. VRM 関節の剛性: <VRM_joint_stiffness_percent>%➕➖\n4. オーディオ視覚効果: <audio_visualizer>\n5. BVH ローダーモード: <BVH_loader_mode>\n6. すべての設定をエクスポートする\n7. すべての設定をリセットする\n8. 終了",
+							"zh": "1. ⌨️熱鍵列表及設定\n2. 🎮遊戲手把選項\n3. VRM 關節剛度: <VRM_joint_stiffness_percent>%➕➖\n4. 音訊視覺化工具: <audio_visualizer>\n5. BVH 載入器模式: <BVH_loader_mode>\n6. 匯出所有設定\n7. 重置所有設定\n8. 結束"
 						}
 					},
 					"hotkey": {
@@ -3467,6 +3483,15 @@
 								"_default_": "Audio visualizer:\nXR Animator supports various audio visualization effects when a music file is dropped to the app. Turn off this option if you don't want the default \"circular spectrum\" audio visualizer to show up when music plays. Default is \"ON\".",
 								"ja": "オーディオ視覚効果:\nXR Animator は、音楽ファイルをアプリにドロップしたときのさまざまなオーディオ視覚効果をサポートします。 音楽の再生時にデフォルトの「円形スペクトル」オーディオ ビジュアライザを表示したくない場合は、このオプションをオフにします。 デフォルトは「ON」です。",
 								"zh": "音訊視覺化工具:\nXR Animator 支援在播放音樂檔案時使用一些音訊視覺化效果。 如果你不想使用在播放音樂時出現的 3D 「圓形波譜」視覺化效果，可關閉此選項。 預設是「ON」。"
+							}
+						}
+					},
+					"BVH_loader_mode": {
+						"tooltip": {
+							"_translation_": {
+								"_default_": "BVH loader mode:\nThis option switches BVH motion loader mode between default and \"bvh2vrma\". If a certain BVH motion doesn't load properly, switch to another mode and see if it helps. Note that you need to restart the app in order to reload the same motion with another mode.",
+								"ja": "BVH ローダーモード:\nこのオプションは、BVH モーション ローダー モードをデフォルトと 「bvh2vrma」 の間で切り替えます。 特定の BVH モーションが正しく読み込まれない場合は、別のモードに切り替えて問題が解決するかどうかを確認してください。 同じモーションを別のモードで再読み込みするには、アプリを再起動する必要があることに注意してください。",
+								"zh": "BVH 載入器模式:\n此選項可在預設和「bvh2vrma」之間切換 BVH 動畫載入器模式。 如果某個 BVH 動畫無法正確加載，請切換到另一種模式，看看是否有幫助。 請注意，您需要重新啟動應用程式才能使用另一種模式重新載入相同的動作。"
 							}
 						}
 					},

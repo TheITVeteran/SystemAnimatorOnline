@@ -1,5 +1,5 @@
 // Media control for Silverlight and HTML5 Canvas
-// (2025-03-17)
+// (2025-05-01)
 
 var EV_SL_MediaEnded, EV_SL_MediaOpened
 

@@ -1,5 +1,5 @@
 // MMD for System Animator
-// (2025-04-02)
+// (2025-05-01)
 
 var use_full_spectrum = true
 
@@ -672,7 +672,7 @@ MMD_SA._click_to_reset = null;
     }
 
     if (browser_native_mode)
-      SystemAnimator_caches.put("/user-defined-local/my_model.vrm", new Response(SA_topmost_window.DragDrop._path_to_obj[model_filename], {status:200, statusText:"custom_PC_model|"+model_filename}));
+      SystemAnimator_caches.put("/user-defined-local/my_model.vrm", new Response(SA_topmost_window.DragDrop._path_to_obj[model_filename], {status:200, statusText:"custom_PC_model|"+encodeURI(model_filename)}));
     if (webkit_electron_mode)
       System.Gadget.Settings.writeString("LABEL_3D_model_path", src);
   }
@@ -1275,7 +1275,7 @@ const sb_func = async function () {
         blob = await response.blob();
 //console.log(blob)
 //console.log(response)
-        path = response.statusText.split('|').find(v=>/\.(zip|vrm)$/i.test(v)) || 'my_model.zip';
+        path = decodeURIComponent(response.statusText.split('|').find(v=>/\.(zip|vrm)$/i.test(v)) || 'my_model.zip');
       }
     }
 
@@ -13187,7 +13187,7 @@ threeX.utils.convert_AnimationClip_to_VMD = convert_AnimationClip_to_VMD;
         return async function ( url, model, VMD ) {
           init(VMD);
 
-if (/\.vrma$/i.test(url)) {
+if (/\.(vrma|bvh)$/i.test(url)) {
 // three-vrm-animation
 // https://github.com/pixiv/three-vrm/tree/dev/packages/three-vrm-animation
 
@@ -13205,7 +13205,13 @@ if (/\.vrma$/i.test(url)) {
   const modelX = threeX.get_model(0);
   const model_scale = modelX.model_scale;
 
-  const gltfVrma = await GLTF_loader.loadAsync( url );
+  let url_vrma = url;
+  if (/\.bvh$/i.test(url)) {
+    const buffer_vrma = await threeX.utils.export_VRMA(url);
+    url_vrma = URL.createObjectURL(new Blob([buffer_vrma]));
+  }
+
+  const gltfVrma = await GLTF_loader.loadAsync( url_vrma );
   const vrmAnimation = gltfVrma.userData.vrmAnimations[ 0 ];
 // create animation clip
   const clip = THREEX.createVRMAnimationClip( vrmAnimation, modelX.model );
@@ -13247,6 +13253,11 @@ if (/\.vrma$/i.test(url)) {
   const hips_height = modelX.para.pos0['hips'][1] * model_scale;
 //console.log(hips_height)
   const vmd = convert_AnimationClip_to_VMD(clip, clip.tracks, { url, rig_map, hips_height, morphKeys:{} });
+
+  if (url_vrma.indexOf('blob:') != -1) {
+    URL.revokeObjectURL(url_vrma);
+    console.log('BVH => VRMA => VMD', url);
+  }
 
   return vmd;
 }
@@ -13869,7 +13880,8 @@ for (const name of name_sync) {
   const bk_keys_full = bk.keys_full;
   bk_keys.forEach((k,idx)=>{
     const _f = Math.round(k.time*30);
-    if (_f > f) {
+// skip case when the first frame doesn't start with time==0 (i.e. (_f > 0) && (idx == 0))
+    if ((_f > f) && (idx > 0)) {
       let k_last = bk_keys[idx-1];
       const _f_last = Math.round(k_last.time*30);
       const _f_diff = _f - _f_last;
@@ -14071,27 +14083,35 @@ const module_bvh = await System._browser.load_script(System.Gadget.path+'/three.
 BVHLoader = new module_bvh.BVHLoader();
         }
 
-        return async function () {
+        return async function (url_bvh) {
 await init();
 
-let filename;
-let vmd = System._browser.camera.motion_recorder.vmd;
-if (vmd) {
-  filename = 'motion_' + Date.now();
+let filename, bvh_txt;
+if (url_bvh) {
+  const response = await fetch(url_bvh);
+  bvh_txt = await response.text();
 }
-else {
-  filename = MMD_SA.MMD.motionManager.filename;
-  vmd = MMD_SA.vmd_by_filename[filename];
-}
+else  {
+  let vmd = System._browser.camera.motion_recorder.vmd;
+  if (vmd) {
+    filename = 'motion_' + Date.now();
+  }
+  else {
+    filename = MMD_SA.MMD.motionManager.filename;
+    vmd = MMD_SA.vmd_by_filename[filename];
+  }
 
-await System._browser.load_script(toFileProtocol(System.Gadget.path + '/js/BVH_filewriter.js'));
-const bvh_txt = BVH_FileWriter(null, vmd.boneKeys);
+  await System._browser.load_script(toFileProtocol(System.Gadget.path + '/js/BVH_filewriter.js'));
+  bvh_txt = BVH_FileWriter(null, vmd.boneKeys);
+}
 
 // https://github.com/vrm-c/bvh2vrma/blob/main/src/components/LoadBVH.tsx#L43
 const bvh = BVHLoader.parse(bvh_txt);
 const vrmaBuffer = await convertBVHToVRMAnimation(bvh, {
         scale: 0.01
 });
+
+if (url_bvh) return vrmaBuffer;
 
 System._browser.save_file(filename+'.vrma', vrmaBuffer, 'application/octet-stream');
         };

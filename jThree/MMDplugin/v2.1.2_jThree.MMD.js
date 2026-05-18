@@ -1,4 +1,4 @@
-// (2025-02-09)
+// (2025-05-01)
 
 /*!
  * jThree.MMD.js JavaScript Library v1.6.1
@@ -2462,14 +2462,9 @@ VMD.prototype.load = function( url_raw, onload ) {
 // NOTE: url_raw is the raw path WITHOUT toFileProtocol (because this will turn the url to blob url in browser, which makes info like file type and such unrecognizable)
 MMD_SA.vmd_by_filename[decodeURIComponent(url_raw.replace(/^.+[\/\\]/, "").replace(/\.([a-z0-9]{1,4})$/i, ""))] = this;
 //console.log(url_raw)
-// AT: BVH
-if (/\.bvh$/i.test(url_raw)) {
-  MMD_SA.BVHLoader().then(()=>{ BVHLoader.VMD = VMD; BVHLoader.load(url_raw).then((bones)=>{ onload(BVHLoader.toVMD(bones)); }); });
-  return
-}
 
-// AT: FBX/GLTF/VRMA
-if (/\.(fbx|glb|vrma)$/i.test(url_raw)) {
+// AT: BVH/FBX/GLTF/VRMA
+if (/\.(bvh|fbx|glb|vrma)$/i.test(url_raw)) {
   new Promise((resolve)=>{
     if (THREE.MMD.getModels().length) {
       resolve();
@@ -2477,8 +2472,13 @@ if (/\.(fbx|glb|vrma)$/i.test(url_raw)) {
     else {
       window.addEventListener('SA_MMD_model0_onload', ()=>{ resolve(); }, {once:true});
     }
-  }).then(()=>{
-    MMD_SA.THREEX.utils.load_THREEX_motion( url_raw, THREE.MMD.getModels()[0], VMD ).then(vmd=>{ onload(vmd); });
+  }).then(async ()=>{
+    if (/\.bvh$/i.test(url_raw) && !MMD_SA.THREEX.utils.BVH_loader_mode) {
+      MMD_SA.BVHLoader().then(()=>{ BVHLoader.VMD = VMD; BVHLoader.load(url_raw).then((bones)=>{ onload(BVHLoader.toVMD(bones)); }); });
+    }
+    else {
+      MMD_SA.THREEX.utils.load_THREEX_motion( url_raw, THREE.MMD.getModels()[0], VMD ).then(vmd=>{ onload(vmd); });
+    }
   });
   return;
 }
@@ -4013,6 +4013,8 @@ il = Math.max(Math.floor(il * ik_iteration_factor), 1);
 		for (j=0; j<jl; j++) {
 			ikl = ik.links[j];
 			link = bones[ikl.bone];
+//if (link.name.indexOf("腕") != -1) System._browser.camera.DEBUG_show(link.name+':\n' + (new THREE.Vector3().setEulerFromQuaternion(link.quaternion, 'YZX').multiplyScalar(180/Math.PI).toArray().join('\n')) + '\n');
+
 // AT: comment out quaternion.set(0,0,0,1) for independent rotations on linked bones to work
 // limiting rotation from 足首 looks more natural
 if (link.name.indexOf("足首") != -1) link.quaternion.slerp(MMD_SA.TEMP_q.set(0,0,0,1), 0.5);
@@ -4024,7 +4026,7 @@ link_sign[j] = (ikl.limits && model_para && model_para.IK_link_inverted && model
 		loop:
 		for (i=0; i<il; i++) {
 // AT: from CCDIKSolver - save some calculations
-var rotated = false
+let rotated = false
 			for (j=0; j<jl; j++) {
 				ikl = ik.links[j];
 				link = bones[ikl.bone];

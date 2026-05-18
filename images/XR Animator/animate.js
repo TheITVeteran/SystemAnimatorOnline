@@ -1,5 +1,5 @@
 // XR Animator
-// (2025-04-02)
+// (2025-05-01)
 
 var MMD_SA_options = {
 
@@ -3428,7 +3428,7 @@ video:{
 //  hidden:true,
 //  hidden_on_webcam: true,
   scale:0.4, top:-0.5,
-//left:(-0.5*0), top:-1,
+//left:(-0.5*0.5), top:-1,
 //scale:0.4*1,top:0,left:-3,
 //scale:0.4*2,top:0,left:-1,
 },
@@ -3436,7 +3436,7 @@ wireframe:{
 //  hidden:true,
 //  align_with_video:true,
   top:0.5,
-//left:(0.5*-0),top:-1*-1,
+//left:(0.5*0.5),top:-1,
 //left:1,
 //top:0.8,left:0.4,
 //top:0,left:3,
@@ -8401,7 +8401,8 @@ p_bone.is_T_pose = is_T_pose;
 //console.log(Object.assign({}, MMD_SA_options.motion_para[filename]))
         }
 
-        const motion_index = MMD_SA_options._XRA_pose_list[0].findIndex(m=>m.name==filename);
+        let motion_list_index = (System._browser.camera.poseNet.enabled || System._browser.camera.VMC_receiver.mocap_enabled || System._browser.camera.VMC_receiver.bone_enabled) ? 2 : 1;
+        const motion_index = MMD_SA_options._XRA_pose_list[motion_list_index].findIndex(m=>m.name==filename);
         if (motion_index != -1) {
           p = Promise.resolve(true);//new Promise((resolve)=>{ System._browser.on_animation_update.add(resolve, 1,0); });
           if (motion.play_on_ready) {
@@ -10456,7 +10457,7 @@ MMD_SA_options.Dungeon.para_by_grid_id[2].ground_y = explorer_ground_y;
      ,[
         {
           message: {
-  get content() { return 'XR Animator (v0.33.5)\n' + System._browser.translation.get('XR_Animator.UI.UI_options.about_XR_Animator.message'); }
+  get content() { return 'XR Animator (v0.34.0)\n' + System._browser.translation.get('XR_Animator.UI.UI_options.about_XR_Animator.message'); }
  ,bubble_index: 3
  ,branch_list: [
     { key:1, event_id: {
@@ -10697,7 +10698,7 @@ setTimeout(()=>{MMD_SA.THREEX.utils.export_VRMA();}, 0);
         {
           message: {
   get content() {
-return System._browser.translation.get('XR_Animator.UI.UI_options.miscellaneous_options.message').replace(/\<VRM_joint_stiffness_percent\>/, MMD_SA.THREEX.VRM.joint_stiffness_percent).replace(/\<audio_visualizer\>/, (MMD_SA_options.use_CircularSpectrum)?'ON':'OFF');
+return System._browser.translation.get('XR_Animator.UI.UI_options.miscellaneous_options.message').replace(/\<VRM_joint_stiffness_percent\>/, MMD_SA.THREEX.VRM.joint_stiffness_percent).replace(/\<audio_visualizer\>/, (MMD_SA_options.use_CircularSpectrum)?'ON':'OFF').replace(/\<BVH_loader_mode\>/, (!MMD_SA.THREEX.utils.BVH_loader_mode)?System._browser.translation.get('Misc.default'):'bvh2vrma');
   },
   bubble_index: 3,
   para: { no_word_break:true },
@@ -10785,7 +10786,19 @@ MMD_SA_options.Dungeon.utils.tooltip(
 );
       }
     },
-    { key:5, event_index:6,
+    { key:5, event_id:{ func:()=>{
+MMD_SA.THREEX.utils.BVH_loader_mode = (MMD_SA.THREEX.utils.BVH_loader_mode||0) + 1;
+if (MMD_SA.THREEX.utils.BVH_loader_mode > 1)
+  MMD_SA.THREEX.utils.BVH_loader_mode = 0
+      }, goto_event:{event_index:0} },
+      onmouseover: function (e) {
+MMD_SA_options.Dungeon.utils.tooltip(
+  e.clientX, e.clientY,
+  System._browser.translation.get('XR_Animator.UI.UI_options.miscellaneous_options.BVH_loader_mode.tooltip')
+);
+      }
+    },
+    { key:6, event_index:6,
       onmouseover: function (e) {
 MMD_SA_options.Dungeon.utils.tooltip(
   e.clientX, e.clientY,
@@ -10793,8 +10806,8 @@ MMD_SA_options.Dungeon.utils.tooltip(
 );
       }
     },
-    { key:6, event_index:7 },
-    { key:7, is_closing_event:true, event_index:99 },
+    { key:7, event_index:7 },
+    { key:8, is_closing_event:true, event_index:99 },
   ],
           },
           next_step: {},
@@ -11284,6 +11297,7 @@ System._browser.save_file('XRA_settings.json', json, 'application/json');
 			"is_global": true
 		},
 		"audio_visualizer": true,
+		"BVH_loader_mode": null,
 		"camera_face_locking": null,
 		"shoulder_adjust": null,
         "selfie_mode": false,
@@ -11714,7 +11728,7 @@ const object_tracking_page_index = tilt_page_index+1;
 return [
         {
           message: {
-  get content() { return System._browser.translation.get('XR_Animator.UI.motion_capture.mocap_options').replace(/\<smoothing\>/, System._browser.translation.get('Misc.' + ((System._browser.camera.mocap_data_smoothing == 1) ? 'Small' : ((System._browser.camera.mocap_data_smoothing == 2) ? 'Normal' : 'Min')))) + '\n8. ' + System._browser.translation.get('Misc.done'); }
+  get content() { return System._browser.translation.get('XR_Animator.UI.motion_capture.mocap_options').replace(/\<smoothing\>/, System._browser.translation.get('Misc.' + ((System._browser.camera.mocap_data_smoothing == 1) ? 'Small' : ((System._browser.camera.mocap_data_smoothing == 2) ? 'Normal' : 'Min')))).replace(/\<upper_body_blend_mode\>/, (System._browser.camera.upper_body_blend_mode == 1) ? System._browser.translation.get('XR_Animator.UI.motion_capture.mocap_options.upper_body_blend_mode.simple') : System._browser.translation.get('Misc.default')) + '\n9. ' + System._browser.translation.get('Misc.done'); }
  ,bubble_index: 3
  ,branch_list: [
   { key:1, event_index:1 },
@@ -11735,8 +11749,22 @@ MMD_SA_options.Dungeon.utils.tooltip(
 );
     }
   },
-  { key:6, event_index:tilt_page_index },
-  { key:7, branch_index:mocap_options_branch+4,
+  { key:6, event_id: {
+      func: function () {
+if (++System._browser.camera.upper_body_blend_mode > 1)
+  System._browser.camera.upper_body_blend_mode = 0;
+      },
+      goto_event: { branch_index:mocap_options_branch },
+    },
+    onmouseover: function (e) {
+MMD_SA_options.Dungeon.utils.tooltip(
+  e.clientX, e.clientY,
+  System._browser.translation.get('XR_Animator.UI.motion_capture.mocap_options.upper_body_blend_mode.tooltip')
+);
+    }
+  },
+  { key:7, event_index:tilt_page_index },
+  { key:8, branch_index:mocap_options_branch+4,
     onmouseover: function (e) {
 MMD_SA_options.Dungeon.utils.tooltip(
   e.clientX, e.clientY,
@@ -11744,7 +11772,7 @@ MMD_SA_options.Dungeon.utils.tooltip(
 );
     }
   },
-  { key:8, is_closing_event:true, branch_index:done_branch }
+  { key:9, is_closing_event:true, branch_index:done_branch }
   ]
           }
         },
@@ -14392,6 +14420,7 @@ config.user_camera = {
       framework_classification: System._browser.camera.object_detection.framework_classification,
       model_classification: System._browser.camera.object_detection.model_classification,
     },
+    upper_body_blend_mode: System._browser.camera.upper_body_blend_mode,
     mocap_data_smoothing: System._browser.camera.mocap_data_smoothing,
     tilt_adjustment: Object.assign({}, System._browser.camera.tilt_adjustment),
     debug_hidden: MMD_SA_options.user_camera.ML_models.debug_hidden,
@@ -14425,6 +14454,8 @@ config.hotkeys = {
 config.VRM_joint_stiffness_percent = MMD_SA.THREEX.VRM.joint_stiffness_percent;
 config.camera_auto_zoom_percent = MMD_SA_options._camera_auto_zoom_percent;
 config.audio_visualizer = MMD_SA_options.use_CircularSpectrum;
+
+config.BVH_loader_mode = MMD_SA.THREEX.utils.BVH_loader_mode;
 
 for (const p of ['camera_face_locking', 'camera_face_locking_percent', 'camera_face_locking_look_at_target_percent', 'camera_face_locking_movement_x_percent', 'camera_face_locking_movement_y_percent', 'camera_face_locking_movement_z_percent', 'camera_face_locking_z_min', 'camera_face_locking_vertical_constraint_percent', 'camera_face_locking_smooth_time']) {
   config[p] = MMD_SA_options[p];
@@ -14529,6 +14560,7 @@ try {
 
   MMD_SA_options._XRA_settings_imported = config;
 
+// on app start
   for (const p in config) {
     switch (p) {
       case 'language':
@@ -14540,10 +14572,14 @@ try {
 
   if (!MMD_SA.THREEX.THREEX) return;
 
+// before MMD start
   for (const p in config) {
     switch (p) {
       case 'shoulder_adjust':
         shoulder_adjust(p);
+        break;
+      case 'BVH_loader_mode':
+        MMD_SA.THREEX.utils.BVH_loader_mode = config[p];
         break;
     }
   }
@@ -14640,6 +14676,8 @@ try {
         System._browser.camera.object_detection.model_classification = config[p].ML_models.object_detection?.model_classification;
 
         System._browser.camera.mocap_data_smoothing = config[p].ML_models.mocap_data_smoothing;
+
+        System._browser.camera.upper_body_blend_mode = config[p].ML_models.upper_body_blend_mode;
 
         MMD_SA_options.user_camera.streamer_mode = config[p].streamer_mode || { camera_preference:{} };
         Object.assign(System._browser.camera.tilt_adjustment, config[p].ML_models.tilt_adjustment||{});

@@ -1,5 +1,5 @@
 // SA Electron - Main EXTENDED
-// (2024-10-10)
+// (2025-05-01)
 
 /*
 eval on Electron v1.6.x has some scope issues/bugs which makes the global variables on this script inaccessible inside functions.
@@ -129,10 +129,12 @@ app.on('ready', function() {
     return
   }
 
+/*
   if (windows_mode && !electron.systemPreferences.isAeroGlassEnabled()) {
     global.is_natural_opaque = true
     global.is_transparent = false
   }
+*/
 
   if (linux_mode) {
 //    global.is_natural_opaque = true

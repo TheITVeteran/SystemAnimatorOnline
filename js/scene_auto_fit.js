@@ -1,5 +1,5 @@
 // auto fit
-// (2025-04-02)
+// (2025-05-01)
 
 const v1 = new THREE.Vector3();
 const v2 = new THREE.Vector3();
@@ -563,6 +563,21 @@ function process_gesture() {
       }
     }
 
+    if (_para.info_key) {
+      let value = obj[p];
+      if (typeof value == 'number') {
+        value = Math.round(value*1000)/1000;
+      }
+      else {
+        for (const p in value) {
+          if (typeof value[p] == 'number')
+            value[p] = Math.round(value[p]*1000)/1000;
+        }
+        value = JSON.stringify(value);
+      }
+      info_key = _para.info_key.name + ':' + value;
+    }
+
     if (_para.helper) {
       const helpers = [_para.helper];
       for (let i = 0; i < 9; i++) {
@@ -768,6 +783,8 @@ function process_gesture() {
         const g_parent = g_event[gesture_name];
         if (g_parent.action._cooldown_timestamp > RAF_timestamp) continue;
 
+        const is_key = /^key\|/.test(name_raw);
+
 // use unconverted name
         const gesture_name_raw = name_raw.replace(/^.+\|/, '').replace(/\#\d$/, '');
         const ge = gesture[gesture_name_raw];
@@ -950,6 +967,8 @@ System._browser.camera.DEBUG_show(condition.contact_target.name+':'+dis)
 
         if (!condition_passed) continue;
 
+        info_key = '';
+
         if (g.action.attach) {
           const passed = Object.keys(g.action.attach).every((object_id, i)=>{
             const object3d = para.json.XR_Animator_scene.object3D_list.find(obj=>obj.id==object_id);
@@ -966,15 +985,6 @@ System._browser.camera.DEBUG_show(condition.contact_target.name+':'+dis)
               p_bone = x_object.parent_bone;
             }
 
-            const hand_free = MMD_SA.THREEX._object3d_list_.every(obj=>!obj.parent_bone || obj.parent_bone.disabled || ((x_object.parent_bone_list) ? x_object.parent_bone_list.indexOf(obj.parent_bone) != -1 : obj.parent_bone == p_bone) || (obj.parent_bone.name != d + p_bone.name.substring(1)));
-            if (!hand_free) return i != 0;
-
-            x_object.parent_bone = p_bone;
-            p_bone.disabled = false;
-
-// for simplicity
-            x_object.placement.hidden = true;
-
             let attached_side = g.action.attach[object_id].attached_side;
             if (attached_side) {
               attached_side = (attached_side == 'left') ? '左' : '右';
@@ -982,6 +992,15 @@ System._browser.camera.DEBUG_show(condition.contact_target.name+':'+dis)
             else if (i == 0) {
               attached_side = d;
             }
+
+            const hand_free = MMD_SA.THREEX._object3d_list_.every(obj=>!obj.parent_bone || obj.parent_bone.disabled || ((x_object.parent_bone_list) ? x_object.parent_bone_list.indexOf(obj.parent_bone) != -1 : obj.parent_bone == p_bone) || (obj.parent_bone.name != (attached_side||d) + p_bone.name.substring(1)));
+            if (!hand_free) return i != 0;
+
+            x_object.parent_bone = p_bone;
+            p_bone.disabled = false;
+
+// for simplicity
+            x_object.placement.hidden = true;
 
             if (attached_side && ((p_bone.name.indexOf('左')!=-1 || p_bone.name.indexOf('右')!=-1) && (p_bone.name.charAt(0) != attached_side))) {
               p_bone.name = attached_side + p_bone.name.substring(1);
@@ -1180,6 +1199,21 @@ System._browser.camera.DEBUG_show(condition.contact_target.name+':'+dis)
           }
         }
 
+        if (is_key || info_key) {
+          if (!info_key)
+            info_key = name_raw + '/' + Date.now();
+          System._browser.camera.DEBUG_show('');
+          if (System._browser.camera.ML_enabled) {
+            System._browser.camera.DEBUG_show(info_key);
+            if (info_key_timestamp)
+              clearTimeout(info_key_timestamp);
+            info_key_timestamp = setTimeout(()=>{ info_key_timestamp=null; System._browser.camera.DEBUG_show(''); }, 3000);
+          }
+          else {
+            System._browser.camera.DEBUG_show(info_key, 3);
+          }
+        }
+
         break;
       }
 
@@ -1187,6 +1221,8 @@ System._browser.camera.DEBUG_show(condition.contact_target.name+':'+dis)
     }
   }
 }
+
+let info_key, info_key_timestamp;
 
 function restore_explorer_mode(e) {
   const ev = e.detail.e;

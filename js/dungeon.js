@@ -1,4 +1,4 @@
-// (2025-04-02)
+// (2025-05-01)
 
 MMD_SA_options.Dungeon = (function () {
 
@@ -3488,7 +3488,6 @@ System._browser.translation.dictionary = {
 										"zh": "使用者介面現已關閉。 點擊螢幕並按住 1 秒鐘，然後按 / 鍵切換下方介面的顯示。"
 									}
 								},
-
 								"green_screen": {
 									"_translation_": {
 										"_default_": "green screen",

@@ -1,4 +1,4 @@
-// (2025-04-02)
+// (2025-05-01)
 
 MMD_SA.fn = {
 /*
@@ -739,12 +739,13 @@ axis_origin.applyQuaternion(obj.quaternion).add(obj.position);
         bone_rot = modelX.get_bone_rotation_by_MMD_name((!rot_adjust.external_point.offset?.ignore_local_rotation) ? d+'腕' : '上半身2');
         bone_ext.applyQuaternion(bone_rot);
       }
-      else if (rot_adjust.external_point.name == 'head') {
-        bone_pos = modelX.get_bone_position_by_MMD_name('頭');
+      else {
+        const name_MMD = MMD_SA.THREEX.VRM.bone_map_VRM_to_MMD[rot_adjust.external_point.name];
+        bone_pos = modelX.get_bone_position_by_MMD_name(name_MMD);
         bone_ext = MMD_SA.TEMP_v3.set(0,0,0);
         if (rot_adjust.external_point.offset)
           bone_ext.add(rot_adjust.external_point.offset);
-        bone_rot = modelX.get_bone_rotation_by_MMD_name('頭')
+        bone_rot = modelX.get_bone_rotation_by_MMD_name(name_MMD)
         bone_ext.applyQuaternion(bone_rot);
       }
 
@@ -814,6 +815,8 @@ axis_origin.applyQuaternion(obj.quaternion).add(obj.position);
       }
 
       const axis_ext_length = axis_ext.length();
+
+      rot_adjust.axis_ext_process_func?.call(rot_adjust, axis_ext, p_bone.name);
 
       let axis_ref = MMD_SA._v3a.copy(rot_adjust.reference_point).sub(reference_origin);
       axis_ref.normalize().applyQuaternion(obj.quaternion);
