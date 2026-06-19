@@ -162,7 +162,9 @@ var TOKEN_TYPES = Object.freeze({
   Or: "Or",
   Not: "UnaryOperator",
   Macro: "Macro",
-  EndMacro: "EndMacro"
+  EndMacro: "EndMacro",
+  Break: "Break",
+  Continue: "Continue"
 });
 var KEYWORDS = Object.freeze({
   set: TOKEN_TYPES.Set,
@@ -181,6 +183,8 @@ var KEYWORDS = Object.freeze({
   "not in": TOKEN_TYPES.NotIn,
   macro: TOKEN_TYPES.Macro,
   endmacro: TOKEN_TYPES.EndMacro,
+  break: TOKEN_TYPES.Break,
+  continue: TOKEN_TYPES.Continue,
   // Literals
   true: TOKEN_TYPES.BooleanLiteral,
   false: TOKEN_TYPES.BooleanLiteral,
@@ -407,6 +411,12 @@ var For = class extends Statement {
   }
   type = "For";
 };
+var Break = class extends Statement {
+  type = "Break";
+};
+var Continue = class extends Statement {
+  type = "Continue";
+};
 var SetStatement = class extends Statement {
   constructor(assignee, value, body) {
     super();
@@ -604,6 +614,16 @@ function parse(tokens) {
         expect(TOKEN_TYPES.OpenStatement, "Expected {% token");
         expect(TOKEN_TYPES.EndFor, "Expected endfor token");
         expect(TOKEN_TYPES.CloseStatement, "Expected %} token");
+        break;
+      case TOKEN_TYPES.Break:
+        ++current;
+        expect(TOKEN_TYPES.CloseStatement, "Expected closing statement token");
+        result = new Break();
+        break;
+      case TOKEN_TYPES.Continue:
+        ++current;
+        expect(TOKEN_TYPES.CloseStatement, "Expected closing statement token");
+        result = new Continue();
         break;
       default:
         throw new SyntaxError(`Unknown statement type: ${tokens[current].type}`);
@@ -1002,6 +1022,10 @@ function titleCase(value) {
 }
 
 // src/runtime.ts
+var BreakControl = class extends Error {
+};
+var ContinueControl = class extends Error {
+};
 var RuntimeValue = class {
   type = "RuntimeValue";
   value;
@@ -1065,6 +1089,32 @@ var StringValue = class extends RuntimeValue {
       "lstrip",
       new FunctionValue(() => {
         return new StringValue(this.value.trimStart());
+      })
+    ],
+    [
+      "startswith",
+      new FunctionValue((args) => {
+        if (args.length === 0) {
+          throw new Error("startswith() requires at least one argument");
+        }
+        const prefix = args[0];
+        if (!(prefix instanceof StringValue)) {
+          throw new Error("startswith() argument must be a string");
+        }
+        return new BooleanValue(this.value.startsWith(prefix.value));
+      })
+    ],
+    [
+      "endswith",
+      new FunctionValue((args) => {
+        if (args.length === 0) {
+          throw new Error("endswith() requires at least one argument");
+        }
+        const suffix = args[0];
+        if (!(suffix instanceof StringValue)) {
+          throw new Error("endswith() argument must be a string");
+        }
+        return new BooleanValue(this.value.endsWith(suffix.value));
       })
     ],
     [
@@ -1798,8 +1848,18 @@ var Interpreter = class {
       ]);
       scope.setVariable("loop", new ObjectValue(loop));
       scopeUpdateFunctions[i](scope);
-      const evaluated = this.evaluateBlock(node.body, scope);
-      result += evaluated.value;
+      try {
+        const evaluated = this.evaluateBlock(node.body, scope);
+        result += evaluated.value;
+      } catch (err) {
+        if (err instanceof ContinueControl) {
+          continue;
+        }
+        if (err instanceof BreakControl) {
+          break;
+        }
+        throw err;
+      }
       noIteration = false;
     }
     if (noIteration) {
@@ -1859,6 +1919,10 @@ var Interpreter = class {
         return this.evaluateFor(statement, environment);
       case "Macro":
         return this.evaluateMacro(statement, environment);
+      case "Break":
+        throw new BreakControl();
+      case "Continue":
+        throw new ContinueControl();
       case "NumericLiteral":
         return new NumericValue(Number(statement.value));
       case "StringLiteral":
@@ -1961,6 +2025,194 @@ function toJSON(input, indent, depth) {
   }
 }
 
+// src/format.ts
+var NEWLINE = "\n";
+var OPEN_STATEMENT = "{%- ";
+var CLOSE_STATEMENT = " -%}";
+var OPERATOR_PRECEDENCE = {
+  MultiplicativeBinaryOperator: 2,
+  AdditiveBinaryOperator: 1,
+  ComparisonBinaryOperator: 0
+};
+function format(program, indent = "	") {
+  const indentStr = typeof indent === "number" ? " ".repeat(indent) : indent;
+  const body = formatStatements(program.body, 0, indentStr);
+  return body.replace(/\n$/, "");
+}
+function createStatement(...text) {
+  return OPEN_STATEMENT + text.join(" ") + CLOSE_STATEMENT;
+}
+function formatStatements(stmts, depth, indentStr) {
+  return stmts.map((stmt) => formatStatement(stmt, depth, indentStr)).join(NEWLINE);
+}
+function formatStatement(node, depth, indentStr) {
+  const pad = indentStr.repeat(depth);
+  switch (node.type) {
+    case "Program":
+      return formatStatements(node.body, depth, indentStr);
+    case "If":
+      return formatIf(node, depth, indentStr);
+    case "For":
+      return formatFor(node, depth, indentStr);
+    case "Set":
+      return formatSet(node, depth, indentStr);
+    case "Macro":
+      return formatMacro(node, depth, indentStr);
+    case "Break":
+      return pad + createStatement("break");
+    case "Continue":
+      return pad + createStatement("continue");
+    default:
+      return pad + "{{- " + formatExpression(node) + " -}}";
+  }
+}
+function formatIf(node, depth, indentStr) {
+  const pad = indentStr.repeat(depth);
+  const clauses = [];
+  let current = node;
+  while (current) {
+    clauses.push({ test: current.test, body: current.body });
+    if (current.alternate.length === 1 && current.alternate[0].type === "If") {
+      current = current.alternate[0];
+    } else {
+      break;
+    }
+  }
+  let out = pad + createStatement("if", formatExpression(clauses[0].test)) + NEWLINE + formatStatements(clauses[0].body, depth + 1, indentStr);
+  for (let i = 1; i < clauses.length; i++) {
+    out += NEWLINE + pad + createStatement("elif", formatExpression(clauses[i].test)) + NEWLINE + formatStatements(clauses[i].body, depth + 1, indentStr);
+  }
+  if (current && current.alternate.length > 0) {
+    out += NEWLINE + pad + createStatement("else") + NEWLINE + formatStatements(current.alternate, depth + 1, indentStr);
+  }
+  out += NEWLINE + pad + createStatement("endif");
+  return out;
+}
+function formatFor(node, depth, indentStr) {
+  const pad = indentStr.repeat(depth);
+  let formattedIterable = "";
+  if (node.iterable.type === "SelectExpression") {
+    const n = node.iterable;
+    formattedIterable = `${formatExpression(n.iterable)} if ${formatExpression(n.test)}`;
+  } else {
+    formattedIterable = formatExpression(node.iterable);
+  }
+  let out = pad + createStatement("for", formatExpression(node.loopvar), "in", formattedIterable) + NEWLINE + formatStatements(node.body, depth + 1, indentStr);
+  if (node.defaultBlock.length > 0) {
+    out += NEWLINE + pad + createStatement("else") + NEWLINE + formatStatements(node.defaultBlock, depth + 1, indentStr);
+  }
+  out += NEWLINE + pad + createStatement("endfor");
+  return out;
+}
+function formatSet(node, depth, indentStr) {
+  const pad = indentStr.repeat(depth);
+  const left = formatExpression(node.assignee);
+  const right = node.value ? formatExpression(node.value) : "";
+  const value = pad + createStatement("set", `${left}${node.value ? " = " + right : ""}`);
+  if (node.body.length === 0) {
+    return value;
+  }
+  return value + NEWLINE + formatStatements(node.body, depth + 1, indentStr) + NEWLINE + pad + createStatement("endset");
+}
+function formatMacro(node, depth, indentStr) {
+  const pad = indentStr.repeat(depth);
+  const args = node.args.map(formatExpression).join(", ");
+  return pad + createStatement("macro", `${node.name.value}(${args})`) + NEWLINE + formatStatements(node.body, depth + 1, indentStr) + NEWLINE + pad + createStatement("endmacro");
+}
+function formatExpression(node, parentPrec = -1) {
+  switch (node.type) {
+    case "Identifier":
+      return node.value;
+    case "NullLiteral":
+      return "none";
+    case "NumericLiteral":
+    case "BooleanLiteral":
+      return `${node.value}`;
+    case "StringLiteral":
+      return JSON.stringify(node.value);
+    case "BinaryExpression": {
+      const n = node;
+      const thisPrecedence = OPERATOR_PRECEDENCE[n.operator.type] ?? 0;
+      const left = formatExpression(n.left, thisPrecedence);
+      const right = formatExpression(n.right, thisPrecedence + 1);
+      const expr = `${left} ${n.operator.value} ${right}`;
+      return thisPrecedence < parentPrec ? `(${expr})` : expr;
+    }
+    case "UnaryExpression": {
+      const n = node;
+      const val = n.operator.value + (n.operator.value === "not" ? " " : "") + formatExpression(n.argument, Infinity);
+      return val;
+    }
+    case "LogicalNegationExpression":
+      return `not ${formatExpression(node.argument, Infinity)}`;
+    case "CallExpression": {
+      const n = node;
+      const args = n.args.map((a) => formatExpression(a, -1)).join(", ");
+      return `${formatExpression(n.callee, -1)}(${args})`;
+    }
+    case "MemberExpression": {
+      const n = node;
+      let obj = formatExpression(n.object, -1);
+      if (n.object.type !== "Identifier") {
+        obj = `(${obj})`;
+      }
+      let prop = formatExpression(n.property, -1);
+      if (!n.computed && n.property.type !== "Identifier") {
+        prop = `(${prop})`;
+      }
+      return n.computed ? `${obj}[${prop}]` : `${obj}.${prop}`;
+    }
+    case "FilterExpression": {
+      const n = node;
+      const operand = formatExpression(n.operand, Infinity);
+      if (n.filter.type === "CallExpression") {
+        return `${operand} | ${formatExpression(n.filter, -1)}`;
+      }
+      return `${operand} | ${n.filter.value}`;
+    }
+    case "SelectExpression": {
+      const n = node;
+      return `${formatExpression(n.iterable, -1)} | select(${formatExpression(n.test, -1)})`;
+    }
+    case "TestExpression": {
+      const n = node;
+      return `${formatExpression(n.operand, -1)} is${n.negate ? " not" : ""} ${n.test.value}`;
+    }
+    case "ArrayLiteral":
+    case "TupleLiteral": {
+      const elems = node.value.map((e) => formatExpression(e, -1));
+      const brackets = node.type === "ArrayLiteral" ? "[]" : "()";
+      return `${brackets[0]}${elems.join(", ")}${brackets[1]}`;
+    }
+    case "ObjectLiteral": {
+      const entries = Array.from(node.value.entries()).map(
+        ([k, v]) => `${formatExpression(k, -1)}: ${formatExpression(v, -1)}`
+      );
+      return `{ ${entries.join(", ")} }`;
+    }
+    case "SliceExpression": {
+      const n = node;
+      const s = n.start ? formatExpression(n.start, -1) : "";
+      const t = n.stop ? formatExpression(n.stop, -1) : "";
+      const st = n.step ? `:${formatExpression(n.step, -1)}` : "";
+      return `${s}:${t}${st}`;
+    }
+    case "KeywordArgumentExpression": {
+      const n = node;
+      return `${n.key.value}=${formatExpression(n.value, -1)}`;
+    }
+    case "If": {
+      const n = node;
+      const test = formatExpression(n.test, -1);
+      const body = formatExpression(n.body[0], 0);
+      const alternate = formatExpression(n.alternate[0], -1);
+      return `${body} if ${test} else ${alternate}`;
+    }
+    default:
+      throw new Error(`Unknown expression type: ${node.type}`);
+  }
+}
+
 // src/index.ts
 var Template = class {
   parsed;
@@ -1990,6 +2242,9 @@ var Template = class {
     const interpreter = new Interpreter(env);
     const result = interpreter.run(this.parsed);
     return result.value;
+  }
+  format(options) {
+    return format(this.parsed, options?.indent || "	");
   }
 };
 
@@ -2949,6 +3204,10 @@ class ImageProcessor extends _utils_generic_js__WEBPACK_IMPORTED_MODULE_0__.Call
         this.pad_size = config.pad_size;
         // @ts-expect-error TS2339
         this.do_pad = config.do_pad;
+        // @ts-expect-error TS2339
+        this.min_pixels = config.min_pixels;
+        // @ts-expect-error TS2339
+        this.max_pixels = config.max_pixels;
 
         if (this.do_pad && !this.pad_size && this.size && this.size.width !== undefined && this.size.height !== undefined) {
             // Should pad, but no pad size specified
@@ -3222,12 +3481,11 @@ class ImageProcessor extends _utils_generic_js__WEBPACK_IMPORTED_MODULE_0__.Call
 
         } else if (this.size_divisibility !== undefined) {
             return enforce_size_divisibility([srcWidth, srcHeight], this.size_divisibility);
-        } else if (size.min_pixels !== undefined && size.max_pixels !== undefined) {
+        } else if (this.min_pixels !== undefined && this.max_pixels !== undefined) {
             // Custom resize logic for Qwen2-VL models
-            const { min_pixels, max_pixels } = size;
             // @ts-expect-error TS2339
             const factor = this.config.patch_size * this.config.merge_size;
-            return smart_resize(srcHeight, srcWidth, factor, min_pixels, max_pixels);
+            return smart_resize(srcHeight, srcWidth, factor, this.min_pixels, this.max_pixels);
         } else {
             throw new Error(`Could not resize image due to unsupported \`this.size\` option in config: ${JSON.stringify(size)}`);
         }
@@ -3756,6 +4014,7 @@ function getNormalizedConfig(config) {
             mapping['hidden_size'] = 'hidden_size';
             mapping['num_attention_heads'] = 'num_attention_heads';
             break;
+        case 'qwen3':
         case 'gemma':
         case 'gemma2':
         case 'gemma3_text':
@@ -4096,7 +4355,7 @@ __webpack_require__.r(__webpack_exports__);
 
 
 
-const VERSION = '3.5.0';
+const VERSION = '3.5.1';
 
 // Check if various APIs are available (depends on environment)
 const IS_BROWSER_ENV = typeof window !== "undefined" && typeof window.document !== "undefined";
@@ -6147,6 +6406,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   ConvNextV2ForImageClassification: () => (/* binding */ ConvNextV2ForImageClassification),
 /* harmony export */   ConvNextV2Model: () => (/* binding */ ConvNextV2Model),
 /* harmony export */   ConvNextV2PreTrainedModel: () => (/* binding */ ConvNextV2PreTrainedModel),
+/* harmony export */   DFineForObjectDetection: () => (/* binding */ DFineForObjectDetection),
+/* harmony export */   DFineModel: () => (/* binding */ DFineModel),
+/* harmony export */   DFinePreTrainedModel: () => (/* binding */ DFinePreTrainedModel),
 /* harmony export */   DPTForDepthEstimation: () => (/* binding */ DPTForDepthEstimation),
 /* harmony export */   DPTModel: () => (/* binding */ DPTModel),
 /* harmony export */   DPTPreTrainedModel: () => (/* binding */ DPTPreTrainedModel),
@@ -6431,6 +6693,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   Qwen2PreTrainedModel: () => (/* binding */ Qwen2PreTrainedModel),
 /* harmony export */   Qwen2VLForConditionalGeneration: () => (/* binding */ Qwen2VLForConditionalGeneration),
 /* harmony export */   Qwen2VLPreTrainedModel: () => (/* binding */ Qwen2VLPreTrainedModel),
+/* harmony export */   Qwen3ForCausalLM: () => (/* binding */ Qwen3ForCausalLM),
+/* harmony export */   Qwen3Model: () => (/* binding */ Qwen3Model),
+/* harmony export */   Qwen3PreTrainedModel: () => (/* binding */ Qwen3PreTrainedModel),
 /* harmony export */   RFDetrForObjectDetection: () => (/* binding */ RFDetrForObjectDetection),
 /* harmony export */   RFDetrModel: () => (/* binding */ RFDetrModel),
 /* harmony export */   RFDetrObjectDetectionOutput: () => (/* binding */ RFDetrObjectDetectionOutput),
@@ -6781,6 +7046,7 @@ async function getSession(pretrained_model_name_or_path, fileName, options) {
     const session_config = {
         dtype: selectedDtype,
         kv_cache_dtype,
+        device: selectedDevice,
     }
 
     // Construct the model file name
@@ -6961,6 +7227,10 @@ function validateInputs(session, inputs) {
     return checkedInputs;
 }
 
+// Currently, Transformers.js doesn't support simultaneous execution of sessions in WASM/WebGPU.
+// For this reason, we need to chain the inference calls (otherwise we get "Error: Session already started").
+let webInferenceChain = Promise.resolve();
+
 /**
  * Executes an InferenceSession using the specified inputs.
  * NOTE: `inputs` must contain at least the input names of the model.
@@ -6977,17 +7247,28 @@ async function sessionRun(session, inputs) {
     try {
         // pass the original ort tensor
         const ortFeed = Object.fromEntries(Object.entries(checkedInputs).map(([k, v]) => [k, v.ort_tensor]));
-        let output = await session.run(ortFeed);
-        output = replaceTensors(output);
-        return output;
+        const run = () => session.run(ortFeed);
+        const output = await ((_env_js__WEBPACK_IMPORTED_MODULE_14__.apis.IS_BROWSER_ENV || _env_js__WEBPACK_IMPORTED_MODULE_14__.apis.IS_WEBWORKER_ENV)
+            ? (webInferenceChain = webInferenceChain.then(run))
+            : run());
+        return replaceTensors(output);
     } catch (e) {
         // Error messages can be long (nested) and uninformative. For this reason,
         // we apply minor formatting to show the most important information
         const formatted = Object.fromEntries(Object.entries(checkedInputs)
-            .map(([k, { type, dims, data }]) => [k, {
+            .map(([k, tensor]) => {
                 // Extract these properties from the underlying ORT tensor
-                type, dims, data,
-            }]));
+                const unpacked = {
+                    type: tensor.type,
+                    dims: tensor.dims,
+                    location: tensor.location,
+                }
+                if (unpacked.location !== "gpu-buffer") {
+                    // Only return the data if it's not a GPU buffer
+                    unpacked.data = tensor.data;
+                }
+                return [k, unpacked];
+            }));
 
         // This usually occurs when the inputs are of the wrong type.
         console.error(`An error occurred during model execution: "${e}".`);
@@ -11116,6 +11397,22 @@ class Qwen2Model extends Qwen2PreTrainedModel { }
 class Qwen2ForCausalLM extends Qwen2PreTrainedModel { }
 //////////////////////////////////////////////////
 
+
+//////////////////////////////////////////////////
+// Qwen3 models
+
+/**
+ * The bare Qwen3 Model outputting raw hidden-states without any specific head on top.
+ */
+class Qwen3PreTrainedModel extends PreTrainedModel { }
+/**
+ * The bare Qwen3 Model outputting raw hidden-states without any specific head on top.
+ */
+class Qwen3Model extends Qwen3PreTrainedModel { }
+
+class Qwen3ForCausalLM extends Qwen3PreTrainedModel { }
+//////////////////////////////////////////////////
+
 class Qwen2VLPreTrainedModel extends PreTrainedModel {
     forward_params = [
         // Text inputs
@@ -11751,7 +12048,7 @@ class RTDetrV2ForObjectDetection extends RTDetrV2PreTrainedModel {
     }
 }
 
-class RTDetrV2ObjectDetectionOutput extends RTDetrObjectDetectionOutput {}
+class RTDetrV2ObjectDetectionOutput extends RTDetrObjectDetectionOutput { }
 //////////////////////////////////////////////////
 
 //////////////////////////////////////////////////
@@ -11766,7 +12063,20 @@ class RFDetrForObjectDetection extends RFDetrPreTrainedModel {
     }
 }
 
-class RFDetrObjectDetectionOutput extends RTDetrObjectDetectionOutput {}
+class RFDetrObjectDetectionOutput extends RTDetrObjectDetectionOutput { }
+//////////////////////////////////////////////////
+
+//////////////////////////////////////////////////
+class DFinePreTrainedModel extends PreTrainedModel { }
+class DFineModel extends DFinePreTrainedModel { }
+class DFineForObjectDetection extends DFinePreTrainedModel {
+    /**
+     * @param {any} model_inputs
+     */
+    async _call(model_inputs) {
+        return new RTDetrObjectDetectionOutput(await super._call(model_inputs));
+    }
+}
 //////////////////////////////////////////////////
 
 //////////////////////////////////////////////////
@@ -14078,6 +14388,7 @@ const MODEL_MAPPING_NAMES_ENCODER_ONLY = new Map([
     ['rt_detr', ['RTDetrModel', RTDetrModel]],
     ['rt_detr_v2', ['RTDetrV2Model', RTDetrV2Model]],
     ['rf_detr', ['RFDetrModel', RFDetrModel]],
+    ['d_fine', ['DFineModel', DFineModel]],
     ['table-transformer', ['TableTransformerModel', TableTransformerModel]],
     ['vit', ['ViTModel', ViTModel]],
     ['ijepa', ['IJepaModel', IJepaModel]],
@@ -14165,6 +14476,7 @@ const MODEL_MAPPING_NAMES_DECODER_ONLY = new Map([
     ['glm', ['GlmModel', GlmModel]],
     ['openelm', ['OpenELMModel', OpenELMModel]],
     ['qwen2', ['Qwen2Model', Qwen2Model]],
+    ['qwen3', ['Qwen3Model', Qwen3Model]],
     ['phi', ['PhiModel', PhiModel]],
     ['phi3', ['Phi3Model', Phi3Model]],
     ['mpt', ['MptModel', MptModel]],
@@ -14265,6 +14577,7 @@ const MODEL_FOR_CAUSAL_LM_MAPPING_NAMES = new Map([
     ['glm', ['GlmForCausalLM', GlmForCausalLM]],
     ['openelm', ['OpenELMForCausalLM', OpenELMForCausalLM]],
     ['qwen2', ['Qwen2ForCausalLM', Qwen2ForCausalLM]],
+    ['qwen3', ['Qwen3ForCausalLM', Qwen3ForCausalLM]],
     ['phi', ['PhiForCausalLM', PhiForCausalLM]],
     ['phi3', ['Phi3ForCausalLM', Phi3ForCausalLM]],
     ['mpt', ['MptForCausalLM', MptForCausalLM]],
@@ -14379,6 +14692,7 @@ const MODEL_FOR_OBJECT_DETECTION_MAPPING_NAMES = new Map([
     ['rt_detr', ['RTDetrForObjectDetection', RTDetrForObjectDetection]],
     ['rt_detr_v2', ['RTDetrV2ForObjectDetection', RTDetrV2ForObjectDetection]],
     ['rf_detr', ['RFDetrForObjectDetection', RFDetrForObjectDetection]],
+    ['d_fine', ['DFineForObjectDetection', DFineForObjectDetection]],
     ['table-transformer', ['TableTransformerForObjectDetection', TableTransformerForObjectDetection]],
     ['yolos', ['YolosForObjectDetection', YolosForObjectDetection]],
 ]);
@@ -26525,20 +26839,27 @@ class PreTrainedTokenizer extends _utils_generic_js__WEBPACK_IMPORTED_MODULE_0__
             // For single input, we just wrap in an array, and then unwrap later.
             encodedTokens = [this._encode_plus(text, { text_pair, add_special_tokens, return_token_type_ids })];
         }
-        // At this point, tokens is batched: [batch_size, tokens]
-        // However, array may be jagged. So, we pad to max_length
-
+        // At this point, `encodedTokens` is batched, of shape [batch_size, tokens].
+        // However, array may be jagged. So, we may need pad to max_length.
         if (max_length === null) {
-            if (padding === 'max_length') {
+            max_length = this.model_max_length;
+        } else if (truncation === null) {
+            if (padding === true) {
+                console.warn(
+                    "`max_length` is ignored when `padding: true` and there is no truncation strategy. " +
+                    "To pad to max length, use `padding: 'max_length'`."
+                )
                 max_length = this.model_max_length;
-            } else {
-                // Calculate max length from sequences
-                max_length = (0,_utils_maths_js__WEBPACK_IMPORTED_MODULE_3__.max)(encodedTokens.map(x => x.input_ids.length))[0];
+            } else if (padding === false) {
+                console.warn("Truncation was not explicitly activated but `max_length` is provided a specific value, please use `truncation: true` to explicitly truncate examples to max length.");
+                truncation = true;
             }
-        } else {
-            if (!truncation) {
-                console.warn(`Truncation was not explicitly activated but \`max_length\` is provided a specific value, please use \`truncation=true\` to explicitly truncate examples to max length.`)
-            }
+        }
+
+        // padding: 'max_length' doesn't require any additional calculation
+        // but padding: true has to calculate max_length from the sequences
+        if (padding === true) {
+            max_length = Math.min((0,_utils_maths_js__WEBPACK_IMPORTED_MODULE_3__.max)(encodedTokens.map(x => x.input_ids.length))[0], max_length ?? Infinity);
         }
 
         // Ensure it is less than model max length
@@ -30091,7 +30412,7 @@ __webpack_require__.r(__webpack_exports__);
 
 /**
  * @file Utility functions to interact with the Hugging Face Hub (https://huggingface.co/models)
- * 
+ *
  * @module utils/hub
  */
 
@@ -30109,7 +30430,7 @@ __webpack_require__.r(__webpack_exports__);
 const MAX_EXTERNAL_DATA_CHUNKS = 100;
 
 /**
- * @typedef {Object} PretrainedOptions Options for loading a pretrained model.     
+ * @typedef {Object} PretrainedOptions Options for loading a pretrained model.
  * @property {import('./core.js').ProgressCallback} [progress_callback=null] If specified, this function will be called during model construction, to provide the user with progress updates.
  * @property {import('../configs.js').PretrainedConfig} [config=null] Configuration for the model to use instead of an automatically loaded configuration. Configuration can be automatically loaded when:
  * - The model is a model provided by the library (loaded with the *model id* string of a pretrained model).
@@ -30248,7 +30569,7 @@ class FileResponse {
     /**
      * Reads the contents of the file specified by the filePath property and returns a Promise that
      * resolves with a parsed JavaScript object containing the file's contents.
-     * 
+     *
      * @returns {Promise<Object>} A Promise that resolves with a parsed JavaScript object containing the file's contents.
      * @throws {Error} If the file cannot be read.
      */
@@ -30285,7 +30606,7 @@ const REPO_ID_REGEX = /^(\b[\w\-.]+\b\/)?\b[\w\-.]{1,96}\b$/;
 /**
  * Tests whether a string is a valid Hugging Face model ID or not.
  * Adapted from https://github.com/huggingface/huggingface_hub/blob/6378820ebb03f071988a96c7f3268f5bdf8f9449/src/huggingface_hub/utils/_validators.py#L119-L170
- * 
+ *
  * @param {string} string The string to test
  * @returns {boolean} True if the string is a valid model ID, false otherwise.
  */
@@ -30304,9 +30625,14 @@ function isValidHfModelId(string) {
  */
 async function getFile(urlOrPath) {
 
-    if (_env_js__WEBPACK_IMPORTED_MODULE_2__.env.useFS && !isValidUrl(urlOrPath, ['http:', 'https:', 'blob:'])) {
-        return new FileResponse(urlOrPath.toString());
-
+    if (_env_js__WEBPACK_IMPORTED_MODULE_2__.env.useFS && !isValidUrl(urlOrPath, ["http:", "https:", "blob:"])) {
+        return new FileResponse(
+          urlOrPath instanceof URL
+            ? urlOrPath.protocol === "file:"
+              ? urlOrPath.pathname
+              : urlOrPath.toString()
+            : urlOrPath,
+        );
     } else if (typeof process !== 'undefined' && process?.release?.name === 'node') {
         const IS_CI = !!process.env?.TESTING_REMOTELY;
         const version = _env_js__WEBPACK_IMPORTED_MODULE_2__.env.version;
@@ -30370,7 +30696,7 @@ function handleError(status, remoteURL, fatal) {
 class FileCache {
     /**
      * Instantiate a `FileCache` object.
-     * @param {string} path 
+     * @param {string} path
      */
     constructor(path) {
         this.path = path;
@@ -30378,7 +30704,7 @@ class FileCache {
 
     /**
      * Checks whether the given request is in the cache.
-     * @param {string} request 
+     * @param {string} request
      * @returns {Promise<FileResponse | undefined>}
      */
     async match(request) {
@@ -30395,8 +30721,8 @@ class FileCache {
 
     /**
      * Adds the given response to the cache.
-     * @param {string} request 
-     * @param {Response} response 
+     * @param {string} request
+     * @param {Response} response
      * @param {(data: {progress: number, loaded: number, total: number}) => void} [progress_callback] Optional.
      * The function to call with progress updates
      * @returns {Promise<void>}
@@ -30454,7 +30780,7 @@ class FileCache {
 }
 
 /**
- * 
+ *
  * @param {FileCache|Cache} cache The cache to search
  * @param {string[]} names The names of the item to search for
  * @returns {Promise<FileResponse|Response|undefined>} The item from the cache, or undefined if not found.
@@ -34742,6 +35068,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   ConvNextV2ForImageClassification: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.ConvNextV2ForImageClassification),
 /* harmony export */   ConvNextV2Model: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.ConvNextV2Model),
 /* harmony export */   ConvNextV2PreTrainedModel: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.ConvNextV2PreTrainedModel),
+/* harmony export */   DFineForObjectDetection: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.DFineForObjectDetection),
+/* harmony export */   DFineModel: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.DFineModel),
+/* harmony export */   DFinePreTrainedModel: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.DFinePreTrainedModel),
 /* harmony export */   DPTFeatureExtractor: () => (/* reexport safe */ _models_image_processors_js__WEBPACK_IMPORTED_MODULE_14__.DPTFeatureExtractor),
 /* harmony export */   DPTForDepthEstimation: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.DPTForDepthEstimation),
 /* harmony export */   DPTImageProcessor: () => (/* reexport safe */ _models_image_processors_js__WEBPACK_IMPORTED_MODULE_14__.DPTImageProcessor),
@@ -35129,6 +35458,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   Qwen2VLImageProcessor: () => (/* reexport safe */ _models_image_processors_js__WEBPACK_IMPORTED_MODULE_14__.Qwen2VLImageProcessor),
 /* harmony export */   Qwen2VLPreTrainedModel: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.Qwen2VLPreTrainedModel),
 /* harmony export */   Qwen2VLProcessor: () => (/* reexport safe */ _models_processors_js__WEBPACK_IMPORTED_MODULE_17__.Qwen2VLProcessor),
+/* harmony export */   Qwen3ForCausalLM: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.Qwen3ForCausalLM),
+/* harmony export */   Qwen3Model: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.Qwen3Model),
+/* harmony export */   Qwen3PreTrainedModel: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.Qwen3PreTrainedModel),
 /* harmony export */   RFDetrForObjectDetection: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.RFDetrForObjectDetection),
 /* harmony export */   RFDetrModel: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.RFDetrModel),
 /* harmony export */   RFDetrObjectDetectionOutput: () => (/* reexport safe */ _models_js__WEBPACK_IMPORTED_MODULE_2__.RFDetrObjectDetectionOutput),

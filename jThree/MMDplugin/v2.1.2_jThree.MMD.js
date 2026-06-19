@@ -1,4 +1,4 @@
-// (2025-05-01)
+// (2025-06-15)
 
 /*!
  * jThree.MMD.js JavaScript Library v1.6.1
@@ -5098,6 +5098,10 @@ if ((v.keys.length==1) && that._is_MMD_SA_animation) {
 		}
 		currKey = v.keys[ v.k ]; //getKey( v, v.k );
 		nextKey = v.keys[ v.k+1 ]; //getKey( v, v.k+1 );
+
+// v0.34.2
+if (!nextKey) { nextKey = currKey; console.log(111); }
+
 // AT: morph skip for childs of group morph
 if (morph_to_skip[nextKey.name]) {
 //DEBUG_show(nextKey.name,0,1)
@@ -5136,6 +5140,10 @@ else
 						v.k++;
 						currKey = v.keys[ v.k ]; //getKey( v, v.k );
 						nextKey = v.keys[ v.k+1 ]; //getKey( v, v.k+1 );
+
+// v0.34.2
+if (!nextKey) { nextKey = currKey; console.log(222); break; }
+
 					}
 				} else {
 					that.time = nextKey.time;
@@ -5145,6 +5153,10 @@ else
 					v.k++;
 					currKey = v.keys[ v.k ]; //getKey( v, v.k );
 					nextKey = v.keys[ v.k+1 ]; //getKey( v, v.k+1 );
+
+// v0.34.2
+if (!nextKey) { nextKey = currKey; console.log(333); break; }
+
 				} while ( nextKey.time < that.time );
 			}
 		}

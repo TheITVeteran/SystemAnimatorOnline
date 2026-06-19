@@ -1,5 +1,5 @@
 // XR Animator
-// (2025-05-01)
+// (2025-06-15)
 
 var MMD_SA_options = {
 
@@ -3428,7 +3428,7 @@ video:{
 //  hidden:true,
 //  hidden_on_webcam: true,
   scale:0.4, top:-0.5,
-//left:(-0.5*0.5), top:-1,
+//left:(-0.5*-0.5), top:-1,
 //scale:0.4*1,top:0,left:-3,
 //scale:0.4*2,top:0,left:-1,
 },
@@ -3436,7 +3436,7 @@ wireframe:{
 //  hidden:true,
 //  align_with_video:true,
   top:0.5,
-//left:(0.5*0.5),top:-1,
+//left:(0.5*1),top:-1,
 //left:1,
 //top:0.8,left:0.4,
 //top:0,left:3,
@@ -10457,7 +10457,7 @@ MMD_SA_options.Dungeon.para_by_grid_id[2].ground_y = explorer_ground_y;
      ,[
         {
           message: {
-  get content() { return 'XR Animator (v0.34.0)\n' + System._browser.translation.get('XR_Animator.UI.UI_options.about_XR_Animator.message'); }
+  get content() { return 'XR Animator (v0.34.2)\n' + System._browser.translation.get('XR_Animator.UI.UI_options.about_XR_Animator.message'); }
  ,bubble_index: 3
  ,branch_list: [
     { key:1, event_id: {
@@ -11728,7 +11728,7 @@ const object_tracking_page_index = tilt_page_index+1;
 return [
         {
           message: {
-  get content() { return System._browser.translation.get('XR_Animator.UI.motion_capture.mocap_options').replace(/\<smoothing\>/, System._browser.translation.get('Misc.' + ((System._browser.camera.mocap_data_smoothing == 1) ? 'Small' : ((System._browser.camera.mocap_data_smoothing == 2) ? 'Normal' : 'Min')))).replace(/\<upper_body_blend_mode\>/, (System._browser.camera.upper_body_blend_mode == 1) ? System._browser.translation.get('XR_Animator.UI.motion_capture.mocap_options.upper_body_blend_mode.simple') : System._browser.translation.get('Misc.default')) + '\n9. ' + System._browser.translation.get('Misc.done'); }
+  get content() { return System._browser.translation.get('XR_Animator.UI.motion_capture.mocap_options').replace(/\<smoothing\>/, System._browser.translation.get('Misc.' + ((System._browser.camera.mocap_data_smoothing == 1) ? 'Small' : ((System._browser.camera.mocap_data_smoothing == 2) ? 'Normal' : 'Min')))).replace(/\<upper_body_blend_mode\>/, (System._browser.camera.upper_body_blend_mode_raw == 1) ? System._browser.translation.get('XR_Animator.UI.motion_capture.mocap_options.upper_body_blend_mode.simple') : System._browser.translation.get('Misc.' + ((System._browser.camera.upper_body_blend_mode_raw == 2) ? 'Normal' : 'auto'))) + '\n9. ' + System._browser.translation.get('Misc.done'); }
  ,bubble_index: 3
  ,branch_list: [
   { key:1, event_index:1 },
@@ -11751,7 +11751,8 @@ MMD_SA_options.Dungeon.utils.tooltip(
   },
   { key:6, event_id: {
       func: function () {
-if (++System._browser.camera.upper_body_blend_mode > 1)
+System._browser.camera.upper_body_blend_mode = System._browser.camera.upper_body_blend_mode_raw + 1;
+if (System._browser.camera.upper_body_blend_mode_raw > 2)
   System._browser.camera.upper_body_blend_mode = 0;
       },
       goto_event: { branch_index:mocap_options_branch },
@@ -14420,7 +14421,7 @@ config.user_camera = {
       framework_classification: System._browser.camera.object_detection.framework_classification,
       model_classification: System._browser.camera.object_detection.model_classification,
     },
-    upper_body_blend_mode: System._browser.camera.upper_body_blend_mode,
+    upper_body_blend_mode: System._browser.camera.upper_body_blend_mode_raw,
     mocap_data_smoothing: System._browser.camera.mocap_data_smoothing,
     tilt_adjustment: Object.assign({}, System._browser.camera.tilt_adjustment),
     debug_hidden: MMD_SA_options.user_camera.ML_models.debug_hidden,

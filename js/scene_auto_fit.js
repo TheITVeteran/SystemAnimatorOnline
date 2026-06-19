@@ -1,5 +1,5 @@
 // auto fit
-// (2025-05-01)
+// (2025-05-24)
 
 const v1 = new THREE.Vector3();
 const v2 = new THREE.Vector3();
@@ -1566,6 +1566,8 @@ function load(p) {
     window.removeEventListener('SA_Dungeon_keydown', process_key_press);
 
     window.removeEventListener('SA_XR_Animator_scene_onunload', scene_onunload);
+
+    window.removeEventListener('SA_MMD_before_render', register_fingertips);
   }
 
   function process_key_press(e) {
@@ -1610,6 +1612,41 @@ if (key != null) {
 }
 
 e.detail.result.return_value = return_value;
+  }
+
+  MMD_SA.THREEX.get_model(0).para._fingertips = {
+    _end_vector: {}
+  };
+
+  function register_fingertips() {
+    const modelX = MMD_SA.THREEX.get_model(0);
+    const _fingertips = modelX.para._fingertips;
+    for (const d of ['左', '右']) {
+      const hand_pos = modelX.get_bone_position_by_MMD_name(d+'手首', true);
+      const hand_rot_inv = modelX.get_bone_rotation_by_MMD_name(d+'手首', true).conjugate();
+
+      for (const f of ["親", "人", "中", "薬", "小"]) {
+        const name = d + f + '指' + ((f=='親') ? '２' : '３');
+        const pos = modelX.get_bone_position_by_MMD_name(name, true);
+        if (!pos) continue;
+
+        const rot = modelX.get_bone_rotation_by_MMD_name(name, true);
+
+        if (!_fingertips._end_vector[name]) {
+          const pos0 = modelX.get_bone_origin_by_MMD_name(d + f + '指' + ((f=='親') ? '１' : '２'));
+          const pos1 = modelX.get_bone_origin_by_MMD_name(name);
+          _fingertips._end_vector[name] = new THREE.Vector3().fromArray(pos1).sub(MMD_SA.TEMP_v3.fromArray(pos0)).multiplyScalar(0.5);
+        }
+
+        pos.add(MMD_SA.TEMP_v3.copy(_fingertips._end_vector[name]).applyQuaternion(rot));
+
+        pos.sub(hand_pos);
+        pos.applyQuaternion(hand_rot_inv);
+
+        _fingertips[d + f + '指'] = pos;
+      }
+    }
+//DEBUG_show(Date.now())
   }
 
   para = p;
@@ -1660,6 +1697,9 @@ e.detail.result.return_value = return_value;
 
   window.removeEventListener('SA_MMD_model0_onmotionchange', onmotionchange);
   window.addEventListener('SA_MMD_model0_onmotionchange', onmotionchange);
+
+  window.removeEventListener('SA_MMD_before_render', register_fingertips);
+  window.addEventListener('SA_MMD_before_render', register_fingertips);
 
   window.removeEventListener('SA_XR_Animator_scene_onunload', scene_onunload);
   window.addEventListener('SA_XR_Animator_scene_onunload', scene_onunload);

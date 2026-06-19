@@ -318,8 +318,8 @@
 					},
 					"tooltip": {
 						"_translation_": {
-							"_default_": "Clear all custom poses:\nXR Animator saves custom poses/motions (VMD/FBX/BVH/VRMA) you have dropped to the app, which can be mixed with upper body mocap just like those preset poses. However, the number of custom poses you can save is limited. This option clears all saved custom poses and motions.",
-							"ja": "すべてのカスタムポーズをクリアする:\nXR Animator は、アプリにドロップしたカスタム ポーズ/モーション (VMD/FBX/BVH/VRMA) を保存し、プリセット ポーズと同様に上半身のモーション キャプチャと混合できます。 ただし、保存できるカスタム ポーズの数には制限があります。 このオプションは、保存されているカスタム ポーズとモーションをすべてクリアします。",
+							"_default_": "Clear all custom poses:\nXR Animator saves the location of custom poses/motions (VMD/FBX/BVH/VRMA) you have dropped to the app, which can be mixed with upper body mocap just like those preset poses. However, the number of custom poses you can save is limited. This option clears all saved custom poses and motions.",
+							"ja": "すべてのカスタムポーズをクリアする:\nXR Animator は、アプリにドロップしたカスタム ポーズ/モーション (VMD/FBX/BVH/VRMA) の場所を保存し、プリセット ポーズと同様に上半身のモーション キャプチャと混合できます。 ただし、保存できるカスタム ポーズの数には制限があります。 このオプションは、保存されているカスタム ポーズとモーションをすべてクリアします。",
 							"zh": "清空所有自訂動作:\nXR Animator 會將使用者拖曳的動作檔案 (VMD/FBX/BVH/VRMA) 的位置儲存，而這些自訂動作均可用於上半身動捕。 不過要注意可儲存的自訂動作數目是有上限的。 此選項會清空所有自訂動作。"
 						}
 					}
@@ -1855,9 +1855,9 @@
 					"upper_body_blend_mode": {
 						"tooltip": {
 							"_translation_": {
-								"_default_": "Upper_body_blend_mode:\nThis option determines how upper body mocap is blended with preloaded pose/motion. By default, mocap basically keeps the same orientation as the webcam regardless of the preloaded one, which works better with static pose. \"Simple\" mode simply adds the mocap motion on top of the preloaded one, which works better with vigorous motion.",
-								"ja": "上半身ブレンドモード:\nこの設定は、上半身のモーキャプをプリロード済みのポーズ/モーションとどのようにブレンドするかを決定します。 デフォルトでは、モーキャプはプリロード済みのポーズに関わらず、基本的にWebカメラと同じ向きを維持するため、静的なポーズに適しています。 「シンプル」では、プリロード済みのモーションの上にモーキャプのモーションを追加するだけなので、激しい動きに適しています。",
-								"zh": "上半身混合模式:\n此選項決定上身動作捕捉如何與預先載入的姿勢/動作融合。 預設情況下，無論預先載入的姿勢如何面向，動作捕捉基本上都會與網路攝影機保持相同的方向，這對於靜態姿勢來說效果更好。 「簡單」模式只是在預先載入的動作上加入了動作捕捉動作，這對於劇烈動作來說效果更好。"
+								"_default_": "Upper_body_blend_mode:\nThis option determines how upper body mocap is blended with preloaded pose/motion. \"Normal\" roughly keeps the mocap orientation regardless of the preloaded motion. \"Simple\" simply adds mocap on top, which works better with vigorous preloaded motion. \"Auto\" uses \"Normal\" for preset motion, \"Simple\" for custom motion. Default is \"Auto\".",
+								"ja": "上半身ブレンドモード:\nこの設定は、上半身のモーキャプをプリロードされたポーズ/モーションとブレンドする方法を決定します。 「通常」は、モーションに関係なく、モーキャプの方向を大まかに維持します。 「シンプル」は、モーキャプを上に追加するだけなので、激しいモーションでより効果的に機能します。 「自動」は、プリセットモーションに「通常」を使用し、カスタムモーションに「シンプル」を使用します。",
+								"zh": "上半身混合模式:\n此設定決定上身動作捕捉如何與預先載入的姿勢/動作融合。 無論預先載入的動作如何，「正常」大致維持動作捕捉的方向。 「簡單」只是在預載動作上直接添加動作捕捉，與劇烈的預載動作配合效果更好。 「自動」在使用預設動作時啟動「正常」模式，自訂動作時啟動「簡單」模式。 預設為「自動」。"
 							}
 						},
 						"simple": {
@@ -3553,7 +3553,7 @@
 							},
 							"list": {
 								"_translation_": {
-									"_default_": "NewruGuru, Kai, Nymph, KuraiNoOni, LouLi Lou, skeh, Swoonifer, Nyaarium, Kyonko_VT, ObsidianMaker, Catt, ARON, azhawker, Stimmchen, CoCoNo,"
+									"_default_": "NewruGuru, Nymph, KuraiNoOni, Kai, LouLi Lou, coffee-addict, skeh, Swoonifer, reitoi, Blitzdame, CoCoNo, JM Choi, Motoko Library,"
 								}
 							}
 						}

@@ -1782,6 +1782,18 @@ export class Qwen2Model extends Qwen2PreTrainedModel {
 }
 export class Qwen2ForCausalLM extends Qwen2PreTrainedModel {
 }
+/**
+ * The bare Qwen3 Model outputting raw hidden-states without any specific head on top.
+ */
+export class Qwen3PreTrainedModel extends PreTrainedModel {
+}
+/**
+ * The bare Qwen3 Model outputting raw hidden-states without any specific head on top.
+ */
+export class Qwen3Model extends Qwen3PreTrainedModel {
+}
+export class Qwen3ForCausalLM extends Qwen3PreTrainedModel {
+}
 export class Qwen2VLPreTrainedModel extends PreTrainedModel {
 }
 export class Qwen2VLForConditionalGeneration extends Qwen2VLPreTrainedModel {
@@ -2150,6 +2162,16 @@ export class RFDetrForObjectDetection extends RFDetrPreTrainedModel {
     _call(model_inputs: any): Promise<RFDetrObjectDetectionOutput>;
 }
 export class RFDetrObjectDetectionOutput extends RTDetrObjectDetectionOutput {
+}
+export class DFinePreTrainedModel extends PreTrainedModel {
+}
+export class DFineModel extends DFinePreTrainedModel {
+}
+export class DFineForObjectDetection extends DFinePreTrainedModel {
+    /**
+     * @param {any} model_inputs
+     */
+    _call(model_inputs: any): Promise<RTDetrObjectDetectionOutput>;
 }
 export class TableTransformerPreTrainedModel extends PreTrainedModel {
 }

@@ -1,4 +1,4 @@
-// 2025-01-19
+// 2025-05-24
 
 const is_worker = (typeof window !== "object");
 
@@ -1120,7 +1120,7 @@ return h_list.some(_h=>(_h[0] >= clip[0]) && (_h[1] >= clip[1]) && (_h[0] <= cli
     if (pose) {
       const _multiHandedness = [];
       const _multiHandLandmarks = [];
-      const dis_to_palm = shoulder_width*shoulder_width*0.25;
+      const dis_to_palm = shoulder_width*shoulder_width*0.25 * Math.pow(1 + Math.max(options.stabilize_hand_percent/100-0.2, 0), 4);
       palm_distance_squared().forEach((dis,i)=>{
         if (dis < dis_to_palm) {
           _multiHandedness.push(hands.multiHandedness[i]);

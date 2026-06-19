@@ -1,4 +1,4 @@
-// (2025-05-01)
+// (2025-05-25)
 
 MMD_SA.fn = {
 /*
@@ -655,6 +655,8 @@ if (p_bone.rotation) {
   if (p_bone.rotation.fixed) {
     obj.quaternion.set(0,0,0,1);
     obj_rot.setFromEuler(MMD_SA.TEMP_v3.set(-p_bone.rotation.fixed.x, -p_bone.rotation.fixed.y, p_bone.rotation.fixed.z).multiplyScalar(Math.PI/180), 'YXZ');
+
+    if (System._browser.camera.upper_body_blend_mode) obj_rot.premultiply(System._browser.camera.poseNet.frames._rot_motion_and_camera);
   }
   else {
     obj_rot.copy(obj_rot_raw);
@@ -674,23 +676,25 @@ if (p_bone.rotation) {
   if (rot_adjust && !rot_adjust.disabled && (!rot_adjust.mocap_only || System._browser.camera.VMC_receiver.pose_enabled || (System._browser.camera.poseNet.enabled && System._browser.camera.ML_warmed_up))) {
     const rot_original = MMD_SA._q2.copy(obj.quaternion);
 
-    transfer_to_parent_bone = rot_adjust.transfer_to_parent_bone && (System._browser.camera.poseNet.enabled && System._browser.camera.ML_warmed_up);
+    transfer_to_parent_bone = rot_adjust.transfer_to_parent_bone && (System._browser.camera.poseNet.enabled && System._browser.camera.ML_warmed_up) && ((p_bone.name.indexOf('手首') == -1) || ( MMD_SA.MMD.motionManager.para_SA.motion_tracking_upper_body_only && ((System._browser.camera.poseNet.frames.skin[p_bone.name.charAt(0)+'腕ＩＫ'] && (System._browser.camera.poseNet.frames.get_blend_default_motion('skin', p_bone.name.charAt(0)+'腕ＩＫ')) < 1)) ));
 //rot_adjust.transfer_to_parent_bone_legacy_mode=true;
     if (transfer_to_parent_bone && rot_adjust.transfer_to_parent_bone_legacy_mode) {
       const aa = obj_rot.toAxisAngle();
       obj.quaternion.setFromAxisAngle(aa[0].applyQuaternion(MMD_SA.TEMP_q.copy(MMD_SA_options.model_para_obj.rot_hand_adjust_base[(p_bone.name.charAt(0)=="左")?1:-1]).conjugate() ), -aa[1]);
     }
     else if (rot_adjust.reset_rotation) {
-      if (rot_adjust.reset_rotation === true) {
-        obj.quaternion.set(0,0,0,1);
+      if (rot_adjust.reset_rotation.name) {
+        obj.quaternion.copy(modelX.get_bone_rotation_by_MMD_name(rot_adjust.reset_rotation.name));
       }
       else {
-        if (rot_adjust.reset_rotation.name) {
-          obj.quaternion.copy(modelX.get_bone_rotation_by_MMD_name(rot_adjust.reset_rotation.name));
+        if (rot_adjust.reset_rotation === true) {
+          obj.quaternion.set(0,0,0,1);
         }
         else {
           obj.quaternion.setFromEuler(MMD_SA.TEMP_v3.copy(rot_adjust.reset_rotation));
         }
+
+        if (System._browser.camera.upper_body_blend_mode) obj.quaternion.premultiply(System._browser.camera.poseNet.frames._rot_motion_and_camera);
       }
     }
 

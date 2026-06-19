@@ -1,5 +1,5 @@
 // MMD for System Animator
-// (2025-05-01)
+// (2025-06-15)
 
 var use_full_spectrum = true
 
@@ -698,6 +698,10 @@ MMD_SA._click_to_reset = null;
         MMD_SA_options.motion_shuffle = [index];
         MMD_SA_options.motion_shuffle_list_default = null;
         MMD_SA._force_motion_shuffle = true;
+
+        if (MMD_SA_options._XRA_pose_list?.[0].find(p=>p.is_custom_motion && p.name==filename) != null) {
+          MMD_SA.motion_player_control.enabled = true;
+        }
       }
       else {
         await MMD_SA.load_external_motion(src);
@@ -1962,12 +1966,14 @@ else {
 
       play: function () {
 jThree.MMD.play(true);
-this.paused = false;
       },
 
       pause: function () {
 jThree.MMD.pause();
-this.paused = true;
+      },
+
+      get paused() {
+return !THREE.MMD.motionPlaying;
       },
 
       get currentTime() { return MMD_SA.THREEX.get_model(0).animation.time; },
@@ -8630,6 +8636,10 @@ return decodeURIComponent((MMD_SA.MMD_started) ? this.para.url : ((this.index ==
         get(obj, prop) {
 return MMD_SA_options.model_para_obj[prop];
         },
+        set(obj, prop, value) {
+MMD_SA_options.model_para_obj[prop] = value;
+return true;
+        },
       };
 
       return new Proxy({}, handler);
@@ -9136,6 +9146,10 @@ for (const name in humanBones) {
 para.shoulder_width = (para.pos0['leftUpperArm'][0] - para.pos0['rightUpperArm'][0]) * vrm_scale;;
 para.left_arm_length = v1.fromArray(para.pos0['leftUpperArm']).distanceTo(v2.fromArray(para.pos0['leftHand'])) * vrm_scale;
 para.left_palm_length = (para.pos0['leftMiddleProximal']) ? v1.fromArray(para.pos0['leftHand']).distanceTo(v2.fromArray(para.pos0['leftMiddleProximal'])) * vrm_scale : MMD_SA_options.model_para_obj.left_palm_length;
+
+// v0.34.2
+para.left_finger_length = (para.pos0['leftMiddleProximal'] && para.pos0['leftMiddleIntermediate'] && para.pos0['leftMiddleDistal']) ? (v1.fromArray(para.pos0['leftMiddleProximal']).distanceTo(v2.fromArray(para.pos0['leftMiddleIntermediate'])) + v1.fromArray(para.pos0['leftMiddleIntermediate']).distanceTo(v2.fromArray(para.pos0['leftMiddleDistal'])) * 1.5) * vrm_scale : MMD_SA_options.model_para_obj.left_finger_length;
+
 //para.eye_width = v1.fromArray(para.pos0['leftEye']).distanceTo(v2.fromArray(para.pos0['rightEye'])) * vrm_scale;
 para.left_leg_length = ((para.pos0['leftUpperLeg'][1] - para.pos0['leftLowerLeg'][1]) + (para.pos0['leftLowerLeg'][1] - para.pos0['leftFoot'][1])) * vrm_scale;
 //para.left_leg_IK = [(para.pos0['leftUpperLeg'][0]-para.pos0['leftFoot'][0]) * vrm_scale, (para.pos0['leftUpperLeg'][1]-para.pos0['leftFoot'][1]) * vrm_scale, (para.pos0['leftUpperLeg'][2]-para.pos0['leftFoot'][2]) * vrm_scale];
@@ -14790,7 +14804,11 @@ if (!colliders_for_hands.head) {
     _head_colliders:_head_colliders,
     _head_colliders_default:_head_colliders_default,
 
-    reset: function () {
+    reset: (()=>{
+const _pos = new THREE.Vector3();
+const _ref = new THREE.Vector3();
+
+return function () {
       let head_colliders = this._head_colliders_default;//this._head_colliders || this._head_colliders_default;//
 
       const cos45 = 0.70710678118654752440084436210485;
@@ -14815,12 +14833,31 @@ radius: bs.radius,
       };
 
       colliders_for_hands.head.children = head_colliders.map(c=>{
-        function validate(pos, vector_add, rot_base) {
-const z_min = -modelX.para.spine_length/5;
-return pos.z > z_min;
+        function validate(pos, vector_add, rot_base, reference_point) {
+// v0.34.1
+// Enforce pushing hand backward
+// rot_base is assumed to be 上半身2
+const rot_body = rot_base;//modelX.get_bone_rotation_by_MMD_name('上半身2', true);
+const rot_body_inv = MMD_SA.TEMP_q.copy(rot_body).conjugate();
+_pos.copy(pos).applyQuaternion(rot_body_inv);
+
+// MMD scale
+const z_min = -MMD_SA_options.model_para_obj.spine_length/6;
+if (pos.z < z_min) {
+  vector_add.set(0,0,0);
+  return false;
+}
+
+const z_ref = _ref.copy(reference_point).applyQuaternion(rot_body_inv).z + 0.1;
+if (_pos.z < z_ref) {
+  _pos.z = z_ref;
+  _pos.applyQuaternion(rot_body);
+  pos.copy(_pos);
+}
+return true;//(_poseNet.body_collider.head.reaction_type == 'z_push');
         }
 
-        const z_push = { validate:validate, rotation_base:true };
+        const z_push = { validate:validate, rotation_base:'上半身2' };//true };//
 
         return {
 bone: 'head',
@@ -14835,8 +14872,9 @@ z_push: z_push,
         colliders_for_hands.head.children = [Object.assign({}, colliders_for_hands.head.parent, {is_parent:false, z_push:colliders_for_hands.head.children[0].z_push, use_vector_filter:true})];
         colliders_for_hands.head.parent = null;
       }
-      console.log(colliders_for_hands.head)
-    },
+      console.log(colliders_for_hands.head);
+};
+    })(),
 
     generate_colliders: (()=>{
       let scale, reaction_type;
@@ -17035,7 +17073,17 @@ const options = {
   }
 };
 
-options.SR.enabled = this.options.SR_mode && (((w < 1280) || (h < 720)) && (w*h < 1920*1080));
+let w_min, h_min;
+if (ar > 1) {
+  w_min = 1440;
+  h_min = 810;
+}
+else {
+  w_min = 810;
+  h_min = 1440;
+}
+
+options.SR.enabled = this.options.SR_mode && (((w < w_min) || (h < h_min)) && (w*h < 1920*1080));
 
 let data = { rgba:bitmap, width:w, height:h, options:options };
 transformers_worker.postMessage(data, [data.rgba]);
